@@ -998,6 +998,11 @@ static int hpre_controller_reset_prepare(struct hpre *hpre)
 		return ret;
 	}
 
+#ifdef CONFIG_CRYPTO_QM_UACCE
+	if(qm->use_uacce)
+		uacce_reset_prepare(&qm->uacce);
+#endif
+
 	return 0;
 }
 
@@ -1090,6 +1095,11 @@ static int hpre_controller_reset_done(struct hpre *hpre)
 
 	/* Clear VF MSE bit */
 	hpre_set_mse(hpre, 1);
+
+#ifdef CONFIG_CRYPTO_QM_UACCE
+	if(qm->use_uacce)
+		uacce_reset_done(&qm->uacce);
+#endif
 
 	return 0;
 }
