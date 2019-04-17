@@ -426,7 +426,7 @@ static long uacce_cmd_share_qfr(struct uacce_queue *tgt, int fd)
 		goto out_with_fd;
 
 	/* no ssva is needed if the dev can do fault-from-dev */
-	if (tgt->uacce->ops->flags & UACCE_DEV_FAULT_FROM_DEV)
+	if (tgt->uacce->flags & UACCE_DEV_FAULT_FROM_DEV)
 		goto out_with_fd;
 
 	dev_dbg(&src->uacce->dev, "share ss with %s\n",
@@ -504,7 +504,7 @@ static long uacce_get_ss_dma(struct uacce_queue *q, void __user *arg)
 	long ret = 0;
 	unsigned long dma = 0;
 
-	if (!(uacce->ops->flags & UACCE_DEV_NOIOMMU))
+	if (!(uacce->flags & UACCE_DEV_NOIOMMU))
 		return -EINVAL;
 
 	uacce_qs_wlock();
@@ -558,7 +558,7 @@ static long uacce_fops_compat_ioctl(struct file *filep,
 
 static int uacce_dev_open_check(struct uacce *uacce)
 {
-	if (uacce->ops->flags & UACCE_DEV_NOIOMMU)
+	if (uacce->flags & UACCE_DEV_NOIOMMU)
 		return 0;
 
 	/*
@@ -566,7 +566,7 @@ static int uacce_dev_open_check(struct uacce *uacce)
 	 * table. The better way to check this is counting it per iommu_domain,
 	 * this is just a temporary solution
 	 */
-	if (uacce->ops->flags & (UACCE_DEV_PASID | UACCE_DEV_NOIOMMU))
+	if (uacce->flags & (UACCE_DEV_PASID | UACCE_DEV_NOIOMMU))
 		return 0;
 
 	if (atomic_cmpxchg(&uacce->state, UACCE_ST_INIT, UACCE_ST_OPENNED) !=
@@ -604,7 +604,7 @@ static int uacce_fops_open(struct inode *inode, struct file *filep)
 	if (ret)
 		goto open_err;
 #ifdef CONFIG_IOMMU_SVA
-	if (uacce->ops->flags & UACCE_DEV_PASID) {
+	if (uacce->flags & UACCE_DEV_PASID) {
 		ret = iommu_sva_bind_device(uacce->pdev, current->mm, &pasid,
 					    IOMMU_SVA_FEAT_IOPF, NULL);
 		if (ret)
@@ -683,7 +683,7 @@ static int uacce_fops_release(struct inode *inode, struct file *filep)
 	}
 
 #ifdef CONFIG_IOMMU_SVA
-	if (uacce->ops->flags & UACCE_DEV_SVA)
+	if (uacce->flags & UACCE_DEV_SVA)
 		iommu_sva_unbind_device(uacce->pdev, q->pasid);
 #endif
 
@@ -704,7 +704,7 @@ static enum uacce_qfrt uacce_get_region_type(struct uacce *uacce,
 	size_t next_start = UACCE_QFR_NA;
 
 	for (i = UACCE_QFRT_MAX - 1; i >= 0; i--) {
-		if (vma->vm_pgoff >= uacce->ops->qf_pg_start[i]) {
+		if (vma->vm_pgoff >= uacce->qf_pg_start[i]) {
 			type = i;
 			break;
 		}
@@ -719,8 +719,8 @@ static enum uacce_qfrt uacce_get_region_type(struct uacce *uacce,
 		break;
 
 	case UACCE_QFRT_DKO:
-		if ((uacce->ops->flags & UACCE_DEV_PASID) ||
-		    (uacce->ops->flags & UACCE_DEV_NOIOMMU))
+		if ((uacce->flags & UACCE_DEV_PASID) ||
+		    (uacce->flags & UACCE_DEV_NOIOMMU))
 			return UACCE_QFRT_INVALID;
 		break;
 
@@ -729,7 +729,7 @@ static enum uacce_qfrt uacce_get_region_type(struct uacce *uacce,
 
 	case UACCE_QFRT_SS:
 		/* todo: this can be valid to protect the process space */
-		if (uacce->ops->flags & UACCE_DEV_FAULT_FROM_DEV)
+		if (uacce->flags & UACCE_DEV_FAULT_FROM_DEV)
 			return UACCE_QFRT_INVALID;
 		break;
 
@@ -741,8 +741,8 @@ static enum uacce_qfrt uacce_get_region_type(struct uacce *uacce,
 	/* make sure the mapping size is exactly the same as the region */
 	if (type < UACCE_QFRT_SS) {
 		for (i = type + 1; i < UACCE_QFRT_MAX; i++)
-			if (uacce->ops->qf_pg_start[i] != UACCE_QFR_NA) {
-				next_start = uacce->ops->qf_pg_start[i];
+			if (uacce->qf_pg_start[i] != UACCE_QFR_NA) {
+				next_start = uacce->qf_pg_start[i];
 				break;
 			}
 
@@ -753,11 +753,11 @@ static enum uacce_qfrt uacce_get_region_type(struct uacce *uacce,
 		}
 
 		if (vma_pages(vma) !=
-		    next_start - uacce->ops->qf_pg_start[type]) {
+		    next_start - uacce->qf_pg_start[type]) {
 			dev_err(&uacce->dev, "invalid mmap size "
 				"(%ld vs %ld pages) for region %s.\n",
 				vma_pages(vma),
-				next_start - uacce->ops->qf_pg_start[type],
+				next_start - uacce->qf_pg_start[type],
 				qfrt_str[type]);
 			return UACCE_QFRT_INVALID;
 		}
@@ -809,27 +809,27 @@ static int uacce_fops_mmap(struct file *filep, struct vm_area_struct *vma)
 
 		flags = UACCE_QFRF_MAP | UACCE_QFRF_MMAP;
 
-		if (uacce->ops->flags & UACCE_DEV_NOIOMMU)
+		if (uacce->flags & UACCE_DEV_NOIOMMU)
 			flags |= UACCE_QFRF_DMA;
 		break;
 
 	case UACCE_QFRT_DKO:
 		flags = UACCE_QFRF_MAP | UACCE_QFRF_KMAP;
 
-		if (uacce->ops->flags & UACCE_DEV_NOIOMMU)
+		if (uacce->flags & UACCE_DEV_NOIOMMU)
 			flags |= UACCE_QFRF_DMA;
 		break;
 
 	case UACCE_QFRT_DUS:
-		if (q->uacce->ops->flags & UACCE_DEV_DRVMAP_DUS) {
+		if (q->uacce->flags & UACCE_DEV_DRVMAP_DUS) {
 			flags = UACCE_QFRF_SELFMT;
 			break;
 		}
 
 		flags = UACCE_QFRF_MAP | UACCE_QFRF_MMAP;
-		if (q->uacce->ops->flags & UACCE_DEV_KMAP_DUS)
+		if (q->uacce->flags & UACCE_DEV_KMAP_DUS)
 			flags |= UACCE_QFRF_KMAP;
-		if (q->uacce->ops->flags & UACCE_DEV_NOIOMMU)
+		if (q->uacce->flags & UACCE_DEV_NOIOMMU)
 			flags |= UACCE_QFRF_DMA;
 		break;
 
@@ -909,7 +909,7 @@ static ssize_t uacce_dev_show_api(struct device *dev,
 				  struct device_attribute *attr, char *buf)
 {
 	struct uacce *uacce = UACCE_FROM_CDEV_ATTR(dev);
-	return sprintf(buf, "%s\n", uacce->ops->api_ver);
+	return sprintf(buf, "%s\n", uacce->api_ver);
 }
 static DEVICE_ATTR(api, S_IRUGO, uacce_dev_show_api, NULL);
 
@@ -947,7 +947,7 @@ static ssize_t uacce_dev_show_flags(struct device *dev,
 {
 	struct uacce *uacce = UACCE_FROM_CDEV_ATTR(dev);
 
-	return sprintf(buf, "%d\n", uacce->ops->flags);
+	return sprintf(buf, "%d\n", uacce->flags);
 }
 static DEVICE_ATTR(flags, S_IRUGO, uacce_dev_show_flags, NULL);
 
@@ -980,9 +980,9 @@ static ssize_t uacce_dev_show_qfrs_pg_start(struct device *dev,
 	int i, ret;
 
 	for (i = 0, ret = 0; i < UACCE_QFRT_MAX - 1; i++)
-		ret += sprintf(buf + ret, "%lu\t", uacce->ops->qf_pg_start[i]);
+		ret += sprintf(buf + ret, "%lu\t", uacce->qf_pg_start[i]);
 
-	ret += sprintf(buf + ret, "%lu\n", uacce->ops->qf_pg_start[i]);
+	ret += sprintf(buf + ret, "%lu\n", uacce->qf_pg_start[i]);
 
 	return ret;
 }
@@ -1020,7 +1020,7 @@ static int uacce_create_chrdev(struct uacce *uacce)
 
 	cdev_init(&uacce->cdev, &uacce_fops);
 	uacce->dev_id = ret;
-	uacce->cdev.owner = uacce->ops->owner;
+	uacce->cdev.owner = THIS_MODULE;
 	device_initialize(&uacce->dev);
 	uacce->dev.devt = MKDEV(MAJOR(uacce_devt), uacce->dev_id);
 	uacce->dev.class = uacce_class;
@@ -1108,7 +1108,7 @@ static int uacce_set_iommu_domain(struct uacce *uacce)
 	phys_addr_t resv_msi_base = 0;
 	int ret;
 
-	if (uacce->ops->flags & UACCE_DEV_NOIOMMU)
+	if (uacce->flags & UACCE_DEV_NOIOMMU)
 		return 0;
 
 	/*
@@ -1172,7 +1172,7 @@ static void uacce_unset_iommu_domain(struct uacce *uacce)
 {
 	struct iommu_domain *domain;
 
-	if (uacce->ops->flags & UACCE_DEV_NOIOMMU)
+	if (uacce->flags & UACCE_DEV_NOIOMMU)
 		return;
 
 	domain = iommu_get_domain_for_dev(uacce->pdev);
@@ -1197,7 +1197,7 @@ int uacce_register(struct uacce *uacce)
 		return -ENODEV;
 	}
 
-	if (uacce->ops->flags & UACCE_DEV_NOIOMMU) {
+	if (uacce->flags & UACCE_DEV_NOIOMMU) {
 		add_taint(TAINT_CRAP, LOCKDEP_STILL_OK);
 		dev_warn(uacce->pdev, "device register to noiommu mode, "
 			"this may export kernel data to user space and "
@@ -1205,8 +1205,8 @@ int uacce_register(struct uacce *uacce)
 	}
 
 	/* if dev support fault-from-dev, it should support pasid */
-	if ((uacce->ops->flags & UACCE_DEV_FAULT_FROM_DEV) &&
-	    !(uacce->ops->flags & UACCE_DEV_PASID)) {
+	if ((uacce->flags & UACCE_DEV_FAULT_FROM_DEV) &&
+	    !(uacce->flags & UACCE_DEV_PASID)) {
 		dev_warn(&uacce->dev, "SVM/SAV device should support PASID\n");
 		return -EINVAL;
 	}
@@ -1230,7 +1230,7 @@ int uacce_register(struct uacce *uacce)
 	if (ret)
 		goto err_with_lock;
 
-	if (uacce->ops->flags & UACCE_DEV_PASID) {
+	if (uacce->flags & UACCE_DEV_PASID) {
 #ifdef CONFIG_IOMMU_SVA
 		ret = iommu_sva_init_device(uacce->pdev, IOMMU_SVA_FEAT_IOPF,
 					    0, 0, NULL);
@@ -1239,8 +1239,7 @@ int uacce_register(struct uacce *uacce)
 			goto err_with_lock;
 		}
 #else
-		uacce->ops->flags &=
-			~(UACCE_DEV_FAULT_FROM_DEV | UACCE_DEV_PASID);
+		uacce->flags &= ~(UACCE_DEV_FAULT_FROM_DEV | UACCE_DEV_PASID);
 #endif
 	}
 
