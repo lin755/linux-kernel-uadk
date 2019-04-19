@@ -1438,29 +1438,33 @@ static int hisi_qm_uacce_mmap(struct uacce_queue *q,
 			      struct vm_area_struct *vma,
 			      struct uacce_qfile_region *qfr)
 {
-	struct hisi_qp *qp = (struct hisi_qp *)q->priv;
+	struct hisi_qp *qp = q->priv;
 	struct hisi_qm *qm = qp->qm;
 	size_t sz = vma->vm_end - vma->vm_start;
 	struct pci_dev *pdev = qm->pdev;
 	struct device *dev = &pdev->dev;
-	unsigned long long mmio_base;
 	unsigned long vm_pgoff;
 	int ret;
 
 	switch (qfr->type) {
 	case UACCE_QFRT_MMIO:
-		WARN_ON(sz > PAGE_SIZE);
-		vma->vm_flags |= VM_IO;
-		if (qm->ver == QM_HW_V1)
-			mmio_base = qm->phys_base;
+
+		/* Try to mmap corresponding pages size region */
+		if (qm->ver == QM_HW_V2)
+			WARN_ON(sz > PAGE_SIZE * (QM_DOORBELL_PAGE_NR +
+				QM_V2_DOORBELL_OFFSET / PAGE_SIZE));
 		else
-			mmio_base = qm->phys_base + QM_V2_BASE_OFFSET;
+			WARN_ON(sz > PAGE_SIZE * QM_DOORBELL_PAGE_NR);
+
+		vma->vm_flags |= VM_IO;
+
 		/*
-		 * Warning: This is not safe as multiple queues use the same
-		 * doorbell, v1 hardware interface problem. will fix it in v2
+		 * Warning: This is not safe as multiple processes use the same
+		 * doorbell, v1/v2 hardware interface problem. It will be fixed
+		 * it in next version.
 		 */
 		return remap_pfn_range(vma, vma->vm_start,
-				       mmio_base >> PAGE_SHIFT,
+				       qm->phys_base >> PAGE_SHIFT,
 				       sz, pgprot_noncached(vma->vm_page_prot));
 	case UACCE_QFRT_DUS:
 		if (qm->use_dma_api) {
@@ -1996,6 +2000,7 @@ int hisi_qm_start(struct hisi_qm *qm)
 	struct uacce *uacce = &qm->uacce;
 	unsigned long dus_page_nr = 0;
 	unsigned long dko_page_nr = 0;
+	unsigned long mmio_page_nr = 0;
 
 	if (qm->use_uacce) {
 		dus_page_nr = (PAGE_SIZE - 1 + qm->sqe_size * QM_Q_DEPTH +
@@ -2019,23 +2024,27 @@ int hisi_qm_start(struct hisi_qm *qm)
 
 	/* reset qfr definition */
 #ifdef CONFIG_CRYPTO_QM_UACCE
+	if (qm->ver == QM_HW_V2)
+		mmio_page_nr = QM_DOORBELL_PAGE_NR +
+			       QM_V2_DOORBELL_OFFSET / PAGE_SIZE;
+	else
+		mmio_page_nr = QM_DOORBELL_PAGE_NR;
 	if (qm->use_uacce && qm->use_dma_api) {
 		uacce->qf_pg_start[UACCE_QFRT_MMIO] = 0;
 		uacce->qf_pg_start[UACCE_QFRT_DKO]  = UACCE_QFR_NA;
-		uacce->qf_pg_start[UACCE_QFRT_DUS]  = QM_DOORBELL_PAGE_NR;
-		uacce->qf_pg_start[UACCE_QFRT_SS]   = QM_DOORBELL_PAGE_NR +
+		uacce->qf_pg_start[UACCE_QFRT_DUS]  = mmio_page_nr;
+		uacce->qf_pg_start[UACCE_QFRT_SS]   = mmio_page_nr +
 						      dus_page_nr;
 	} else if (qm->use_uacce) {
 		uacce->qf_pg_start[UACCE_QFRT_MMIO] = 0;
-		uacce->qf_pg_start[UACCE_QFRT_DKO]  = QM_DOORBELL_PAGE_NR;
-		uacce->qf_pg_start[UACCE_QFRT_DUS]  = QM_DOORBELL_PAGE_NR +
+		uacce->qf_pg_start[UACCE_QFRT_DKO]  = mmio_page_nr;
+		uacce->qf_pg_start[UACCE_QFRT_DUS]  = mmio_page_nr +
 						      dko_page_nr;
-		uacce->qf_pg_start[UACCE_QFRT_SS]   = QM_DOORBELL_PAGE_NR +
+		uacce->qf_pg_start[UACCE_QFRT_SS]   = mmio_page_nr +
 						      dko_page_nr +
 						      dus_page_nr;
 	}
 #endif
-
 	if (!qm->qp_bitmap) {
 		qm->qp_bitmap = devm_kcalloc(dev, BITS_TO_LONGS(qm->qp_num),
 					     sizeof(long), GFP_KERNEL);
