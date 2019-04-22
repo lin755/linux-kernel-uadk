@@ -294,7 +294,8 @@ static inline int uacce_queue_mmap_qfr(struct uacce_queue *q,
 
 static struct uacce_qfile_region *uacce_create_region(struct uacce_queue *q,
 						      struct vm_area_struct *vma,
-						      enum uacce_qfrt type, int flags)
+						      enum uacce_qfrt type,
+						      unsigned int flags)
 {
 	struct uacce_qfile_region *qfr;
 	struct uacce *uacce = q->uacce;
@@ -331,8 +332,8 @@ static struct uacce_qfile_region *uacce_create_region(struct uacce_queue *q,
 						PAGE_SHIFT, &qfr->dma,
 						GFP_KERNEL);
 		if (!qfr->kaddr) {
-			goto err_with_qfr;
 			ret = -ENOMEM;
+			goto err_with_qfr;
 		}
 	} else {
 		dev_dbg(uacce->pdev, "allocate %d pages\n", qfr->nr_pages);
@@ -489,7 +490,7 @@ static int uacce_start_queue(struct uacce_queue *q)
 
 err_with_vmap:
 	for (j = i; j >= 0; j--) {
-		qfr = q->qfrs[i];
+		qfr = q->qfrs[j];
 		if (qfr && qfr->kaddr) {
 			vunmap(qfr->kaddr);
 			qfr->kaddr = NULL;
@@ -772,7 +773,8 @@ static int uacce_fops_mmap(struct file *filep, struct vm_area_struct *vma)
 	struct uacce *uacce = q->uacce;
 	enum uacce_qfrt type = uacce_get_region_type(uacce, vma);
 	struct uacce_qfile_region *qfr;
-	int flags = 0, ret;
+	unsigned int flags = 0;
+	int ret;
 
 	dev_dbg(&uacce->dev, "mmap q file(t=%s, off=%lx, start=%lx, end=%lx)\n",
 		 qfrt_str[type], vma->vm_pgoff, vma->vm_start, vma->vm_end);
@@ -968,7 +970,7 @@ static ssize_t uacce_dev_show_algorithms(struct device *dev,
 {
 	struct uacce *uacce = UACCE_FROM_CDEV_ATTR(dev);
 
-	return sprintf(buf, uacce->algs);
+	return sprintf(buf, "%s", uacce->algs);
 }
 static DEVICE_ATTR(algorithms, S_IRUGO, uacce_dev_show_algorithms, NULL);
 
