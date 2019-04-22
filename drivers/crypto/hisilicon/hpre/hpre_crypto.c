@@ -599,7 +599,7 @@ static unsigned long hpre_rsa_key_size_check(unsigned int len)
 		return 0;
 	default:
 		return -1;
-	};
+	}
 }
 
 static int hpre_rsa_enc(struct akcipher_request *req)
