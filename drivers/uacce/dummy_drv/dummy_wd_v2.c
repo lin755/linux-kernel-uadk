@@ -333,11 +333,6 @@ static int dummy_wd2_get_available_instances(struct uacce *uacce) {
 }
 
 static struct uacce_ops dummy_wd2_ops = {
-	.owner = THIS_MODULE,
-	.api_ver = "dummy_v2",
-	.qf_pg_start = { 0, UACCE_QFR_NA, 1, 2 },
-	.flags = 0,
-
 	.get_queue = dummy_wd2_get_queue,
 	.put_queue = dummy_wd2_put_queue,
 	.start_queue = dummy_wd2_start_queue,
@@ -445,6 +440,13 @@ static int dummy_wd2_probe(struct platform_device *pdev) {
 	uacce->ops = &dummy_wd2_ops;
 	uacce->drv_name = DUMMY2_WD;
 	uacce->algs = "memcpy\n";
+	uacce->api_ver = "dummy_v2";
+	uacce->flags = 0;
+	uacce->qf_pg_start[UACCE_QFRT_MMIO] = 0;
+	uacce->qf_pg_start[UACCE_QFRT_DKO] = UACCE_QFR_NA;
+	uacce->qf_pg_start[UACCE_QFRT_DUS] = 1;
+	uacce->qf_pg_start[UACCE_QFRT_SS] = 2;
+
 	ret = uacce_register(uacce);
 	if (ret) {
 		dev_warn(uacce->pdev, "uacce register fail %d\n", ret);

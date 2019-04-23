@@ -276,11 +276,6 @@ static int dummy_get_available_instances(struct uacce *uacce) {
 }
 
 static struct uacce_ops dummy_ops = {
-	.owner = THIS_MODULE,
-	.api_ver = "dummy_v1",
-	.qf_pg_start = { 0, UACCE_QFR_NA, UACCE_QFR_NA, 1 },
-	.flags = UACCE_DEV_NOIOMMU,
-
 	.get_queue = dummy_get_queue,
 	.put_queue = dummy_put_queue,
 	.start_queue = dummy_start_queue,
@@ -322,6 +317,12 @@ static int dummy_wd_probe(struct platform_device *pdev)
 	uacce->ops = &dummy_ops;
 	uacce->drv_name = DUMMY_WD;
 	uacce->algs = "memcpy\n";
+	uacce->api_ver = "dummy_v1";
+	uacce->flags = UACCE_DEV_NOIOMMU;
+	uacce->qf_pg_start[UACCE_QFRT_MMIO] = 0;
+	uacce->qf_pg_start[UACCE_QFRT_DKO] = UACCE_QFR_NA;
+	uacce->qf_pg_start[UACCE_QFRT_DUS] = UACCE_QFR_NA;
+	uacce->qf_pg_start[UACCE_QFRT_SS] = 1;
 
 #ifdef CONFIG_NUMA
 	/*
