@@ -1367,15 +1367,8 @@ static void hisi_qm_cache_wb(struct hisi_qm *qm)
 	}
 }
 
-#ifdef CONFIG_CRYPTO_QM_UACCE
-static void qm_qp_event_notifier(struct hisi_qp *qp)
+int hisi_qm_get_free_qp_num(struct hisi_qm *qm)
 {
-	uacce_wake_up(qp->uacce_q);
-}
-
-static int hisi_qm_get_available_instances(struct uacce *uacce)
-{
-	struct hisi_qm *qm = uacce->priv;
 	int i, ret;
 
 	read_lock(&qm->qps_lock);
@@ -1388,6 +1381,18 @@ static int hisi_qm_get_available_instances(struct uacce *uacce)
 		ret = (ret == qm->qp_num) ? 1 : 0;
 
 	return ret;
+}
+EXPORT_SYMBOL_GPL(hisi_qm_get_free_qp_num);
+
+#ifdef CONFIG_CRYPTO_QM_UACCE
+static void qm_qp_event_notifier(struct hisi_qp *qp)
+{
+	uacce_wake_up(qp->uacce_q);
+}
+
+static int hisi_qm_get_available_instances(struct uacce *uacce)
+{
+	return hisi_qm_get_free_qp_num(uacce->priv);
 }
 
 static int hisi_qm_uacce_get_queue(struct uacce *uacce, unsigned long arg,
