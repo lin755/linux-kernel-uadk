@@ -276,7 +276,6 @@ static inline int uacce_queue_mmap_qfr(struct uacce_queue *q,
 		dev_dbg(q->uacce->pdev, "mmap qfr (page ref=%d)\n",
 			page_ref_count(qfr->pages[0]));
 	for (i = 0; i < qfr->nr_pages; i++) {
-		get_page(qfr->pages[i]);
 		ret = remap_pfn_range(vma, vma->vm_start + (i << PAGE_SHIFT),
 				      page_to_pfn(qfr->pages[i]), PAGE_SIZE,
 				      vma->vm_page_prot);
