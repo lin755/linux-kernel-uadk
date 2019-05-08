@@ -583,6 +583,7 @@ static int uacce_dev_open_check(struct uacce *uacce)
 static int uacce_fops_open(struct inode *inode, struct file *filep)
 {
 	struct uacce_queue *q;
+	struct iommu_sva *handle = NULL;
 	struct uacce *uacce;
 	int ret;
 	int pasid = 0;
@@ -605,10 +606,10 @@ static int uacce_fops_open(struct inode *inode, struct file *filep)
 		goto open_err;
 #ifdef CONFIG_IOMMU_SVA
 	if (uacce->flags & UACCE_DEV_PASID) {
-		ret = iommu_sva_bind_device(uacce->pdev, current->mm, &pasid,
-					    IOMMU_SVA_FEAT_IOPF, NULL);
-		if (ret)
+		handle = iommu_sva_bind_device(uacce->pdev, current->mm, NULL);
+		if (IS_ERR(handle))
 			goto open_err;
+		pasid = iommu_sva_get_pasid(handle);
 	}
 #endif
 	ret = uacce->ops->get_queue(uacce, pasid, &q);
@@ -616,6 +617,7 @@ static int uacce_fops_open(struct inode *inode, struct file *filep)
 		goto open_err;
 
 	q->pasid = pasid;
+	q->handle = handle;
 	q->uacce = uacce;
 	q->mm = current->mm;
 	memset(q->qfrs, 0, sizeof(q->qfrs));
@@ -684,7 +686,7 @@ static int uacce_fops_release(struct inode *inode, struct file *filep)
 
 #ifdef CONFIG_IOMMU_SVA
 	if (uacce->flags & UACCE_DEV_SVA)
-		iommu_sva_unbind_device(uacce->pdev, q->pasid);
+		iommu_sva_unbind_device(q->handle);
 #endif
 
 	if (uacce->ops->put_queue)
@@ -1239,8 +1241,7 @@ int uacce_register(struct uacce *uacce)
 
 	if (uacce->flags & UACCE_DEV_PASID) {
 #ifdef CONFIG_IOMMU_SVA
-		ret = iommu_sva_init_device(uacce->pdev, IOMMU_SVA_FEAT_IOPF,
-					    0, 0, NULL);
+		ret = iommu_dev_enable_feature(uacce->pdev, IOMMU_DEV_FEAT_SVA);
 		if (ret) {
 			uacce_destroy_chrdev(uacce);
 			goto err_with_lock;
@@ -1275,7 +1276,7 @@ void uacce_unregister(struct uacce *uacce)
 	mutex_lock(&uacce_mutex);
 
 #ifdef CONFIG_IOMMU_SVA
-	iommu_sva_shutdown_device(uacce->pdev);
+	iommu_dev_disable_feature(uacce->pdev, IOMMU_DEV_FEAT_SVA);
 #else
 	uacce_unset_iommu_domain(uacce);
 #endif

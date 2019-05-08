@@ -66,6 +66,7 @@ struct uacce_queue {
 	void *priv;
 	wait_queue_head_t wait;
 	int pasid;
+	struct iommu_sva *handle;
 
 	struct list_head list; /* as list for as->qs */
 
