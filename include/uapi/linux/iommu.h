@@ -311,4 +311,19 @@ struct iommu_cache_invalidate_info {
 	};
 };
 
+/**
+ * struct gpasid_bind_data - Information about device and guest PASID binding
+ * @gcr3:	Guest CR3 value from guest mm
+ * @pasid:	Process address space ID used for the guest mm
+ * @addr_width:	Guest address width. Paging mode can also be derived.
+ */
+struct gpasid_bind_data {
+	__u64 gcr3;
+	__u32 pasid;
+	__u32 addr_width;
+	__u32 flags;
+#define	IOMMU_SVA_GPASID_SRE	BIT(0) /* supervisor request */
+	__u8 padding[4];
+};
+
 #endif /* _UAPI_IOMMU_H */
