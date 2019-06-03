@@ -2376,9 +2376,12 @@ static int arm_smmu_dev_disable_feature(struct device *dev,
 static void arm_smmu_mm_invalidate(struct device *dev, int pasid, void *entry,
 				   unsigned long iova, size_t size)
 {
+	struct arm_smmu_cmdq_ent cmd;
+	struct arm_smmu_master *master = dev_iommu_fwspec_get(dev)->iommu_priv;
 
+	arm_smmu_atc_inv_to_cmd(pasid, iova, size, &cmd);
+	arm_smmu_atc_inv_master(master, &cmd);
 	/*
-	 * TODO: Invalidate ATC
 	 * TODO: Invalidate mapping if not DVM
 	 */
 }
@@ -2394,13 +2397,16 @@ static int arm_smmu_mm_attach(struct device *dev, int pasid, void *entry)
 
 static void arm_smmu_mm_detach(struct device *dev, int pasid, void *entry)
 {
+	struct arm_smmu_cmdq_ent cmd;
 	struct iommu_domain *domain = iommu_get_domain_for_dev(dev);
 	struct arm_smmu_domain *smmu_domain = to_smmu_domain(domain);
 	struct iommu_pasid_table_ops *ops = smmu_domain->s1_cfg.ops;
+	struct arm_smmu_master *master = dev_iommu_fwspec_get(dev)->iommu_priv;
 
 	ops->clear_entry(ops, pasid, entry);
 
-	/* TODO: invalidate ATC */
+	arm_smmu_atc_inv_to_cmd(pasid, 0, 0, &cmd);
+	arm_smmu_atc_inv_master(master, &cmd);
 	/* TODO: Invalidate all mappings if last and not DVM. */
 }
 
