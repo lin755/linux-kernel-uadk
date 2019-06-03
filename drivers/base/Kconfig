@@ -188,6 +188,13 @@ config DMA_SHARED_BUFFER
 	  APIs extension; the file's descriptor can then be passed on to other
 	  driver.
 
+config IOASID
+	bool
+	default n
+	help
+	  Enable the I/O Address Space ID allocator. A single ID space shared
+	  between different users.
+
 config DMA_FENCE_TRACE
 	bool "Enable verbose DMA_FENCE_TRACE messages"
 	depends on DMA_SHARED_BUFFER
