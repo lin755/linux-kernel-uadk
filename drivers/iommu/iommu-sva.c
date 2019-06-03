@@ -12,6 +12,8 @@
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 
+#include <trace/events/iommu.h>
+
 #include "iommu-sva.h"
 
 /**
@@ -121,6 +123,7 @@ struct io_mm {
 struct iommu_bond {
 	struct iommu_sva		sva;
 	struct io_mm			*io_mm;
+	int				pasid; /* XXX only for tracing */
 
 	struct list_head		mm_head;
 	struct list_head		dev_head;
@@ -212,6 +215,7 @@ static struct io_mm *io_mm_alloc(struct mm_struct *mm,
 		 * the same critical section, kref is always >0 here.
 		 */
 		kref_get(&old->kref);
+		trace_io_mm_reuse(old->pasid);
 		spin_unlock(&iommu_sva_lock);
 		if (WARN_ON(old->ops != ops)) {
 			old = NULL;
@@ -226,6 +230,7 @@ static struct io_mm *io_mm_alloc(struct mm_struct *mm,
 	mm->iommu_context = io_mm;
 	spin_unlock(&iommu_sva_lock);
 
+	trace_io_mm_alloc(io_mm->pasid);
 	return io_mm;
 
 out_release:
@@ -253,6 +258,7 @@ static void io_mm_free(struct rcu_head *rcu)
 	mm = io_mm->mm;
 
 	io_mm->ops->release(io_mm->ctx);
+	trace_io_mm_free(io_mm->pasid);
 	kfree(io_mm);
 	mmdrop(mm);
 }
@@ -319,6 +325,7 @@ io_mm_attach(struct device *dev, struct io_mm *io_mm, void *drvdata)
 	bond->io_mm	= io_mm;
 	bond->sva.dev	= dev;
 	bond->drvdata	= drvdata;
+	bond->pasid	= io_mm->pasid;
 	refcount_set(&bond->refs, 1);
 	init_waitqueue_head(&bond->mm_exit_wq);
 
@@ -342,6 +349,7 @@ io_mm_attach(struct device *dev, struct io_mm *io_mm, void *drvdata)
 		io_mm_put_locked(io_mm);
 		kfree(bond);
 		spin_unlock(&iommu_sva_lock);
+		trace_io_mm_attach_get(io_mm->pasid, dev);
 		return &tmp->sva;
 	}
 
@@ -353,6 +361,7 @@ io_mm_attach(struct device *dev, struct io_mm *io_mm, void *drvdata)
 	if (ret)
 		goto err_remove;
 
+	trace_io_mm_attach_alloc(io_mm->pasid, dev);
 	return &bond->sva;
 
 err_remove:
@@ -379,6 +388,8 @@ static void io_mm_detach_locked(struct iommu_bond *bond)
 					  lockdep_is_held(&iommu_sva_lock));
 	if (!io_mm)
 		return;
+
+	trace_io_mm_detach(bond->pasid, bond->sva.dev);
 
 	/* Clear the PASID entry, invalidate TLBs and drop the mm.  */
 	list_del_rcu(&bond->mm_head);
@@ -443,6 +454,7 @@ static void iommu_notifier_release(struct mmu_notifier *mn, struct mm_struct *mm
 		bond->mm_exit_active = false;
 		wake_up_all(&bond->mm_exit_wq);
 
+		trace_io_mm_exit(bond->io_mm->pasid, bond->sva.dev);
 		io_mm_detach_locked(bond);
 	}
 
@@ -463,6 +475,8 @@ static void iommu_notifier_invalidate_range(struct mmu_notifier *mn,
 	struct iommu_bond *bond;
 	struct io_mm *io_mm = container_of(mn, struct io_mm, notifier);
 
+	trace_io_mm_invalidate(io_mm->pasid, start, end);
+
 	rcu_read_lock();
 	list_for_each_entry_rcu(bond, &io_mm->devices, mm_head)
 		io_mm->ops->invalidate(bond->sva.dev, io_mm->pasid, io_mm->ctx,
@@ -480,8 +494,10 @@ static void iommu_unbind_locked(struct iommu_bond *bond)
 	struct device *dev = bond->sva.dev;
 	struct iommu_sva_param *param = dev->iommu_param->sva_param;
 
-	if (!refcount_dec_and_test(&bond->refs))
+	if (!refcount_dec_and_test(&bond->refs)) {
+		trace_io_mm_unbind_put(bond->pasid, dev);
 		return;
+	}
 
 	/*
 	 * If an exit handler is running concurrently, let it finish notifying
@@ -491,6 +507,7 @@ static void iommu_unbind_locked(struct iommu_bond *bond)
 	wait_event_lock_irq(bond->mm_exit_wq, !bond->mm_exit_active,
 			    iommu_sva_lock);
 
+	trace_io_mm_unbind_free(bond->pasid, dev);
 	io_mm_detach_locked(bond);
 	param->nr_mms--;
 	kfree_rcu(bond, rcu_head);
