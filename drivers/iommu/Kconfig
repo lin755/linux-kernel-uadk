@@ -103,6 +103,7 @@ config IOMMU_SVA
 	bool
 	select IOASID
 	select IOMMU_API
+	select MMU_NOTIFIER
 
 config FSL_PAMU
 	bool "Freescale IOMMU support"

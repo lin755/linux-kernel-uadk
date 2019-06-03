@@ -108,6 +108,8 @@ struct io_mm {
 	struct list_head		devices;
 	struct kref			kref;
 	struct mm_struct		*mm;
+	struct mmu_notifier		notifier;
+	struct rcu_head			rcu;
 	const struct io_mm_ops		*ops;
 
 	/* Private to the IOMMU driver */
@@ -126,9 +128,13 @@ struct iommu_bond {
 	void				*drvdata;
 	struct rcu_head			rcu_head;
 	refcount_t			refs;
+	struct wait_queue_head		mm_exit_wq;
+	bool				mm_exit_active;
 };
 
 static DECLARE_IOASID_SET(shared_pasid);
+
+static struct mmu_notifier_ops iommu_mmu_notifier_ops;
 
 /*
  * For the moment this is an all-purpose lock. It serializes
@@ -137,6 +143,13 @@ static DECLARE_IOASID_SET(shared_pasid);
  * Lock order: SVA lock; ioasid_lock
  */
 static DEFINE_SPINLOCK(iommu_sva_lock);
+
+static void io_mm_kfree(struct rcu_head *rcu)
+{
+	struct io_mm *io_mm = container_of(rcu, struct io_mm, rcu);
+
+	kfree(io_mm);
+}
 
 /*
  * Allocate an io_mm for the given mm.
@@ -172,6 +185,7 @@ static struct io_mm *io_mm_alloc(struct mm_struct *mm,
 	io_mm->mm		= mm;
 	io_mm->ops		= ops;
 	io_mm->ctx		= ctx;
+	io_mm->notifier.ops	= &iommu_mmu_notifier_ops;
 	INIT_LIST_HEAD_RCU(&io_mm->devices);
 	kref_init(&io_mm->kref);
 
@@ -180,6 +194,15 @@ static struct io_mm *io_mm_alloc(struct mm_struct *mm,
 		ret = -ENOSPC;
 		goto out_free;
 	}
+
+	/*
+	 * After registering the MMU notifier, other threads may start calling
+	 * our invalidate_range() callback. mmu_notifier_register() ensures that
+	 * they see a valid devices list.
+	 */
+	ret = mmu_notifier_register(&io_mm->notifier, mm);
+	if (ret)
+		goto out_free_pasid;
 
 	spin_lock(&iommu_sva_lock);
 	old = mm->iommu_context;
@@ -197,7 +220,7 @@ static struct io_mm *io_mm_alloc(struct mm_struct *mm,
 		}
 		/* Release our io_mm and use the old one */
 		ops->release(ctx);
-		goto out_free_pasid;
+		goto out_release;
 	}
 
 	mm->iommu_context = io_mm;
@@ -205,18 +228,29 @@ static struct io_mm *io_mm_alloc(struct mm_struct *mm,
 
 	return io_mm;
 
+out_release:
+	mmu_notifier_unregister_no_release(&io_mm->notifier, mm);
 out_free_pasid:
 	ioasid_free(io_mm->pasid);
 out_free:
-	kfree(io_mm);
+	/*
+	 * If we installed the MMU notifier, it may be used concurrently by
+	 * invalidations (which won't go far since the devices list is still
+	 * empty). Carefully free the io_mm.
+	 */
+	mmu_notifier_call_srcu(&io_mm->rcu, io_mm_kfree);
 out_drop_mm:
 	mmdrop(mm);
 	return old ?: ERR_PTR(ret);
 }
 
-static void io_mm_free(struct io_mm *io_mm)
+static void io_mm_free(struct rcu_head *rcu)
 {
-	struct mm_struct *mm = io_mm->mm;
+	struct io_mm *io_mm;
+	struct mm_struct *mm;
+
+	io_mm = container_of(rcu, struct io_mm, rcu);
+	mm = io_mm->mm;
 
 	io_mm->ops->release(io_mm->ctx);
 	kfree(io_mm);
@@ -235,7 +269,22 @@ static void io_mm_release(struct kref *kref)
 
 	ioasid_free(io_mm->pasid);
 
-	io_mm_free(io_mm);
+	/*
+	 * If we're being released from mm exit, the notifier callback ->release
+	 * has already been called. Otherwise we don't need ->release, the io_mm
+	 * isn't attached to anything anymore. Hence no_release.
+	 */
+	mmu_notifier_unregister_no_release(&io_mm->notifier, io_mm->mm);
+
+	/*
+	 * We can't free the structure here, because if mm exits during
+	 * unbind(), then ->release might be attempting to grab the io_mm
+	 * concurrently. And in the other case, if ->release is calling
+	 * io_mm_release(), then __mmu_notifier_release() expects to still have
+	 * a valid mn when returning. So free the structure when it's safe,
+	 * after a RCU grace period.
+	 */
+	mmu_notifier_call_srcu(&io_mm->rcu, io_mm_free);
 }
 
 static void io_mm_put_locked(struct io_mm *io_mm)
@@ -271,6 +320,7 @@ io_mm_attach(struct device *dev, struct io_mm *io_mm, void *drvdata)
 	bond->sva.dev	= dev;
 	bond->drvdata	= drvdata;
 	refcount_set(&bond->refs, 1);
+	init_waitqueue_head(&bond->mm_exit_wq);
 
 	spin_lock(&iommu_sva_lock);
 	/* Is it already bound to the device? */
@@ -337,6 +387,92 @@ static void io_mm_detach_locked(struct iommu_bond *bond)
 	rcu_assign_pointer(bond->io_mm, NULL);
 }
 
+static void iommu_sva_notify_mm_exit(struct io_mm *io_mm,
+				     struct iommu_bond *bond)
+{
+	struct device *dev = bond->sva.dev;
+
+	if (!bond->sva.ops || !bond->sva.ops->mm_exit)
+		return;
+
+	if (bond->sva.ops->mm_exit(dev, &bond->sva, bond->drvdata))
+		dev_WARN(dev, "possible leak of PASID %u", io_mm->pasid);
+}
+
+/* Called when the mm exits. Can race with unbind(). */
+static void iommu_notifier_release(struct mmu_notifier *mn, struct mm_struct *mm)
+{
+	struct iommu_bond *bond, *next;
+	struct io_mm *io_mm = container_of(mn, struct io_mm, notifier);
+
+	/*
+	 * If the mm is exiting then devices are still bound to the io_mm.
+	 * A few things need to be done before it is safe to release:
+	 *
+	 * - As the mmu notifier doesn't hold any reference to the io_mm when
+	 *   calling ->release(), try to take a reference.
+	 * - Tell the device driver to stop using this PASID.
+	 * - Clear the PASID table and invalidate TLBs.
+	 * - Drop all references to this io_mm by freeing the bonds.
+	 */
+	spin_lock(&iommu_sva_lock);
+	if (!kref_get_unless_zero(&io_mm->kref)) {
+		/* Someone's already taking care of it. */
+		spin_unlock(&iommu_sva_lock);
+		return;
+	}
+
+	list_for_each_entry_safe(bond, next, &io_mm->devices, mm_head) {
+		/*
+		 * Release the lock to let the handler sleep. We need to be
+		 * careful about concurrent modifications to the list and to the
+		 * bond. To make sure that handler and drvdata are not freed
+		 * while we're using them, tell unbind() not to remove the bond
+		 * until we're done.
+		 */
+		bond->mm_exit_active = true;
+		spin_unlock(&iommu_sva_lock);
+
+		iommu_sva_notify_mm_exit(io_mm, bond);
+
+		spin_lock(&iommu_sva_lock);
+		next = list_next_entry(bond, mm_head);
+
+		bond->mm_exit_active = false;
+		wake_up_all(&bond->mm_exit_wq);
+
+		io_mm_detach_locked(bond);
+	}
+
+	/*
+	 * We're now reasonably certain that no more fault is being handled for
+	 * this io_mm, since we just flushed them all out of the fault queue.
+	 * Release the last reference to free the io_mm.
+	 */
+	io_mm_put_locked(io_mm);
+	spin_unlock(&iommu_sva_lock);
+}
+
+static void iommu_notifier_invalidate_range(struct mmu_notifier *mn,
+					    struct mm_struct *mm,
+					    unsigned long start,
+					    unsigned long end)
+{
+	struct iommu_bond *bond;
+	struct io_mm *io_mm = container_of(mn, struct io_mm, notifier);
+
+	rcu_read_lock();
+	list_for_each_entry_rcu(bond, &io_mm->devices, mm_head)
+		io_mm->ops->invalidate(bond->sva.dev, io_mm->pasid, io_mm->ctx,
+				       start, end - start);
+	rcu_read_unlock();
+}
+
+static struct mmu_notifier_ops iommu_mmu_notifier_ops = {
+	.release		= iommu_notifier_release,
+	.invalidate_range	= iommu_notifier_invalidate_range,
+};
+
 static void iommu_unbind_locked(struct iommu_bond *bond)
 {
 	struct device *dev = bond->sva.dev;
@@ -344,6 +480,14 @@ static void iommu_unbind_locked(struct iommu_bond *bond)
 
 	if (!refcount_dec_and_test(&bond->refs))
 		return;
+
+	/*
+	 * If an exit handler is running concurrently, let it finish notifying
+	 * the device driver. It will then call io_mm_detach_locked() and do
+	 * most of the work, before letting us take the lock again.
+	 */
+	wait_event_lock_irq(bond->mm_exit_wq, !bond->mm_exit_active,
+			    iommu_sva_lock);
 
 	io_mm_detach_locked(bond);
 	param->nr_mms--;
@@ -394,9 +538,10 @@ void iommu_sva_unbind_generic(struct iommu_sva *handle)
 		return;
 
 	mutex_lock(&param->sva_lock);
-	spin_lock(&iommu_sva_lock);
+	/* spin_lock_irq matches the one in wait_event_lock_irq */
+	spin_lock_irq(&iommu_sva_lock);
 	iommu_unbind_locked(to_iommu_bond(handle));
-	spin_unlock(&iommu_sva_lock);
+	spin_unlock_irq(&iommu_sva_lock);
 	mutex_unlock(&param->sva_lock);
 }
 EXPORT_SYMBOL_GPL(iommu_sva_unbind_generic);
