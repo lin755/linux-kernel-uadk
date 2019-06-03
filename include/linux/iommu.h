@@ -591,6 +591,9 @@ int iommu_aux_get_pasid(struct iommu_domain *domain, struct device *dev);
 struct iommu_sva *iommu_sva_bind_device(struct device *dev,
 					struct mm_struct *mm,
 					void *drvdata);
+extern struct iommu_sva *
+iommu_sva_bind_group(struct iommu_group *group, struct mm_struct *mm,
+		     void *drvdata);
 void iommu_sva_unbind_device(struct iommu_sva *handle);
 int iommu_sva_set_ops(struct iommu_sva *handle,
 		      const struct iommu_sva_ops *ops);
@@ -982,6 +985,13 @@ static inline int
 iommu_cache_invalidate(struct iommu_domain *domain,
 		       struct device *dev,
 		       struct iommu_cache_invalidate_info *inv_info)
+{
+	return -ENODEV;
+}
+
+static inline struct iommu_sva *
+iommu_sva_bind_group(struct iommu_group *group, struct mm_struct *mm,
+		     void *drvdata)
 {
 	return -ENODEV;
 }
