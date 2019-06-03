@@ -84,6 +84,18 @@ struct arm_smmu_cd {
 	struct arm_smmu_cd_tables	*tbl;
 };
 
+/*
+ * link between an entry and a table. There is one CD entry per mm (shared or
+ * private), so we use this link to track the number of times an entry is
+ * written in the table (and actually write/clear it only once). For example
+ * multiple devices in the same domain attached to a single mm:
+ */
+struct arm_smmu_cd_link {
+	struct arm_smmu_cd		*cd;
+	int				refs;
+	struct list_head		head;
+};
+
 #define pasid_entry_to_cd(entry) \
 	container_of((entry), struct arm_smmu_cd, entry)
 
@@ -105,6 +117,9 @@ struct arm_smmu_cd_tables {
 			struct arm_smmu_cd_table *tables;
 		} l1;
 	};
+
+	struct list_head		entries;
+	spinlock_t			entries_lock;
 };
 
 #define pasid_to_cd_tables(pasid_table) \
@@ -528,6 +543,8 @@ static int arm_smmu_set_cd(struct iommu_pasid_table_ops *ops, int pasid,
 {
 	struct arm_smmu_cd_tables *tbl = pasid_ops_to_tables(ops);
 	struct arm_smmu_cd *cd = pasid_entry_to_cd(entry);
+	struct arm_smmu_cd_link *link, *tmp;
+	bool set = true;
 
 	if (WARN_ON(pasid > (1 << tbl->pasid.cfg.order)))
 		return -EINVAL;
@@ -535,12 +552,35 @@ static int arm_smmu_set_cd(struct iommu_pasid_table_ops *ops, int pasid,
 	if (WARN_ON(cd->pasid != ARM_SMMU_NO_PASID && cd->pasid != pasid))
 		return -EEXIST;
 
+	link = kzalloc(sizeof(*link), GFP_KERNEL);
+	if (!link)
+		return -ENOMEM;
+
+	link->cd = cd;
+	link->refs = 1;
+
+	spin_lock(&tbl->entries_lock);
+	list_for_each_entry(tmp, &tbl->entries, head) {
+		if (tmp->cd == cd) {
+			tmp->refs++;
+			set = false;
+			break;
+		}
+	}
+	if (set)
+		list_add(&link->head, &tbl->entries);
+	else
+		kfree(link);
+	spin_unlock(&tbl->entries_lock);
+
 	/*
 	 * There is a single cd structure for each address space, multiple
 	 * devices may use the same in different tables.
 	 */
 	cd->users++;
 	cd->pasid = pasid;
+	if (!set)
+		return 0;
 	return arm_smmu_write_ctx_desc(tbl, pasid, cd);
 }
 
@@ -549,14 +589,30 @@ static void arm_smmu_clear_cd(struct iommu_pasid_table_ops *ops, int pasid,
 {
 	struct arm_smmu_cd_tables *tbl = pasid_ops_to_tables(ops);
 	struct arm_smmu_cd *cd = pasid_entry_to_cd(entry);
+	struct arm_smmu_cd_link *link;
+	bool clear = false;
 
 	if (WARN_ON(pasid > (1 << tbl->pasid.cfg.order)))
 		return;
 
 	WARN_ON(cd->pasid != pasid);
-
 	if (!(--cd->users))
 		cd->pasid = ARM_SMMU_NO_PASID;
+
+	spin_lock(&tbl->entries_lock);
+	list_for_each_entry(link, &tbl->entries, head) {
+		if (link->cd == cd) {
+			if (--link->refs == 0) {
+				clear = true;
+				list_del(&link->head);
+				kfree(link);
+			}
+			break;
+		}
+	}
+	spin_unlock(&tbl->entries_lock);
+	if (!clear)
+		return;
 
 	arm_smmu_write_ctx_desc(tbl, pasid, NULL);
 
@@ -582,6 +638,9 @@ arm_smmu_alloc_cd_tables(struct iommu_pasid_table_cfg *cfg, void *cookie)
 	tbl = devm_kzalloc(dev, sizeof(*tbl), GFP_KERNEL);
 	if (!tbl)
 		return NULL;
+
+	INIT_LIST_HEAD(&tbl->entries);
+	spin_lock_init(&tbl->entries_lock);
 
 	num_contexts = 1 << cfg->order;
 	if (num_contexts <= CTXDESC_NUM_L2_ENTRIES) {
