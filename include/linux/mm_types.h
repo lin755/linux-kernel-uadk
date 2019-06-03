@@ -505,6 +505,9 @@ struct mm_struct {
 		/* HMM needs to track a few things per mm */
 		struct hmm *hmm;
 #endif
+#if IS_ENABLED(CONFIG_IOMMU_API)
+		void *iommu_context;
+#endif
 	} __randomize_layout;
 
 	/*
