@@ -397,6 +397,8 @@ static void iommu_sva_notify_mm_exit(struct io_mm *io_mm,
 
 	if (bond->sva.ops->mm_exit(dev, &bond->sva, bond->drvdata))
 		dev_WARN(dev, "possible leak of PASID %u", io_mm->pasid);
+
+	iopf_queue_flush_dev(dev, io_mm->pasid);
 }
 
 /* Called when the mm exits. Can race with unbind(). */
@@ -532,10 +534,19 @@ EXPORT_SYMBOL_GPL(iommu_sva_bind_generic);
 
 void iommu_sva_unbind_generic(struct iommu_sva *handle)
 {
+	int pasid;
 	struct iommu_param *param = handle->dev->iommu_param;
 
 	if (WARN_ON(!param))
 		return;
+
+	/*
+	 * Caller stopped the device from issuing PASIDs, now make sure they are
+	 * out of the fault queue.
+	 */
+	pasid = iommu_sva_get_pasid_generic(handle);
+	if (pasid != IOMMU_PASID_INVALID)
+		iopf_queue_flush_dev(handle->dev, pasid);
 
 	mutex_lock(&param->sva_lock);
 	/* spin_lock_irq matches the one in wait_event_lock_irq */
@@ -574,6 +585,10 @@ int iommu_sva_enable(struct device *dev, struct iommu_sva_param *sva_param)
 		goto err_unlock;
 	}
 
+	ret = iommu_register_device_fault_handler(dev, iommu_queue_iopf, dev);
+	if (ret)
+		goto err_unlock;
+
 	dev->iommu_param->sva_param = new_param;
 	mutex_unlock(&param->sva_lock);
 	return 0;
@@ -611,6 +626,7 @@ int iommu_sva_disable(struct device *dev)
 		goto out_unlock;
 	}
 
+	iommu_unregister_device_fault_handler(dev);
 	kfree(param->sva_param);
 	param->sva_param = NULL;
 out_unlock:
