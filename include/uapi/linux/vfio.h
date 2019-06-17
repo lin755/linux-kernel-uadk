@@ -856,7 +856,7 @@ struct vfio_iommu_type1_bind {
 };
 
 /*
- * VFIO_IOMMU_BIND - _IOWR(VFIO_TYPE, VFIO_BASE + 22, struct vfio_iommu_bind)
+ * VFIO_IOMMU_BIND - _IOWR(VFIO_TYPE, VFIO_BASE + 27, struct vfio_iommu_bind)
  *
  * Manage address spaces of devices in this container. Initially a TYPE1
  * container can only have one address space, managed with
@@ -874,14 +874,14 @@ struct vfio_iommu_type1_bind {
  *
  * returns: 0 on success, -errno on failure.
  */
-#define VFIO_IOMMU_BIND		_IO(VFIO_TYPE, VFIO_BASE + 22)
+#define VFIO_IOMMU_BIND		_IO(VFIO_TYPE, VFIO_BASE + 27)
 
 /*
- * VFIO_IOMMU_UNBIND - _IOWR(VFIO_TYPE, VFIO_BASE + 23, struct vfio_iommu_bind)
+ * VFIO_IOMMU_UNBIND - _IOWR(VFIO_TYPE, VFIO_BASE + 28, struct vfio_iommu_bind)
  *
  * Undo what was done by the corresponding VFIO_IOMMU_BIND ioctl.
  */
-#define VFIO_IOMMU_UNBIND	_IO(VFIO_TYPE, VFIO_BASE + 23)
+#define VFIO_IOMMU_UNBIND	_IO(VFIO_TYPE, VFIO_BASE + 28)
 
 /**
  * VFIO_IOMMU_ATTACH_PASID_TABLE - _IOWR(VFIO_TYPE, VFIO_BASE + 22,
