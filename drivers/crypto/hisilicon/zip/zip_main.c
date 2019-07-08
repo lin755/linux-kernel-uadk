@@ -713,6 +713,11 @@ static int hisi_zip_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto err_remove_from_list;
 	}
 
+	if (qm->fun_type == QM_HW_VF) {
+		qm->use_sva = false;
+		qm->use_dma_api = false;
+	}
+
 	ret = hisi_qm_init(qm);
 	if (ret) {
 		dev_err(&pdev->dev, "Failed to init qm!\n");
