@@ -1065,7 +1065,6 @@ static int uacce_default_start_queue(struct uacce_queue *q)
 	return 0;
 }
 
-#ifndef CONFIG_IOMMU_SVA
 static int uacce_dev_match(struct device *dev, void *data)
 {
 	if (dev->parent == data)
@@ -1117,7 +1116,8 @@ static int uacce_set_iommu_domain(struct uacce *uacce)
 	phys_addr_t resv_msi_base = 0;
 	int ret;
 
-	if (uacce->flags & UACCE_DEV_NOIOMMU)
+	if ((uacce->flags & UACCE_DEV_NOIOMMU) ||
+	    (uacce->flags & UACCE_DEV_PASID))
 		return 0;
 
 	/*
@@ -1181,7 +1181,8 @@ static void uacce_unset_iommu_domain(struct uacce *uacce)
 {
 	struct iommu_domain *domain;
 
-	if (uacce->flags & UACCE_DEV_NOIOMMU)
+	if ((uacce->flags & UACCE_DEV_NOIOMMU) ||
+	    (uacce->flags & UACCE_DEV_PASID))
 		return;
 
 	domain = iommu_get_domain_for_dev(uacce->pdev);
@@ -1191,7 +1192,6 @@ static void uacce_unset_iommu_domain(struct uacce *uacce)
 	} else
 		dev_err(&uacce->dev, "bug: no domain attached to device\n");
 }
-#endif
 
 /**
  *	uacce_register - register an accelerator
@@ -1227,11 +1227,9 @@ int uacce_register(struct uacce *uacce)
 		uacce->ops->get_available_instances =
 			uacce_default_get_available_instances;
 
-#ifndef CONFIG_IOMMU_SVA
 	ret = uacce_set_iommu_domain(uacce);
 	if (ret)
 		return ret;
-#endif
 
 	mutex_lock(&uacce_mutex);
 
@@ -1276,10 +1274,10 @@ void uacce_unregister(struct uacce *uacce)
 	mutex_lock(&uacce_mutex);
 
 #ifdef CONFIG_IOMMU_SVA
-	iommu_dev_disable_feature(uacce->pdev, IOMMU_DEV_FEAT_SVA);
-#else
-	uacce_unset_iommu_domain(uacce);
+	if (uacce->flags & UACCE_DEV_PASID)
+		iommu_dev_disable_feature(uacce->pdev, IOMMU_DEV_FEAT_SVA);
 #endif
+	uacce_unset_iommu_domain(uacce);
 
 	uacce_destroy_chrdev(uacce);
 
