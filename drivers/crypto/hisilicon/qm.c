@@ -10,6 +10,7 @@
 #include <linux/seq_file.h>
 #include <linux/slab.h>
 #include "qm.h"
+#include "qm_usr_if.h"
 
 /* eq/aeq irq enable */
 #define QM_VF_AEQ_INT_SOURCE		0x0
@@ -459,18 +460,34 @@ static void qm_cq_head_update(struct hisi_qp *qp)
 
 static void qm_poll_qp(struct hisi_qp *qp, struct hisi_qm *qm)
 {
-	struct qm_cqe *cqe = qp->cqe + qp->qp_status.cq_head;
+	struct qm_cqe *cqe;
 
-	if (qp->req_cb) {
-		while (QM_CQE_PHASE(cqe) == qp->qp_status.cqc_phase) {
-			dma_rmb();
-			qp->req_cb(qp, qp->sqe + qm->sqe_size * cqe->sq_head);
-			qm_cq_head_update(qp);
-			cqe = qp->cqe + qp->qp_status.cq_head;
-			qm_db(qm, qp->qp_id, QM_DOORBELL_CMD_CQ,
-			      qp->qp_status.cq_head, 0);
-			atomic_dec(&qp->qp_status.used);
+	if (qp->event_cb)
+		qp->event_cb(qp);
+	else {
+		cqe = qp->cqe + qp->qp_status.cq_head;
+
+		if (qp->req_cb) {
+			while (QM_CQE_PHASE(cqe) == qp->qp_status.cqc_phase) {
+				dma_rmb();
+				qp->req_cb(qp, qp->sqe + qm->sqe_size *
+					   cqe->sq_head);
+				qm_cq_head_update(qp);
+				cqe = qp->cqe + qp->qp_status.cq_head;
+				atomic_dec(&qp->qp_status.used);
+			}
+		} else {
+			if (QM_CQE_PHASE(cqe) == qp->qp_status.cqc_phase) {
+				dma_rmb();
+				queue_work(qp->wq, &qp->work);
+				qm_cq_head_update(qp);
+				cqe = qp->cqe + qp->qp_status.cq_head;
+				atomic_dec(&qp->qp_status.used);
+			}
 		}
+
+		qm_db(qm, qp->qp_id, QM_DOORBELL_CMD_CQ,
+		      qp->qp_status.cq_head, 0);
 
 		/* set c_flag */
 		qm_db(qm, qp->qp_id, QM_DOORBELL_CMD_CQ,
@@ -1205,14 +1222,19 @@ static int qm_qp_ctx_cfg(struct hisi_qp *qp, int qp_id, int pasid)
 
 	qm_init_qp_status(qp);
 
-	sqc = kzalloc(sizeof(struct qm_sqc), GFP_KERNEL);
-	if (!sqc)
-		return -ENOMEM;
-	sqc_dma = dma_map_single(dev, sqc, sizeof(struct qm_sqc),
-				 DMA_TO_DEVICE);
-	if (dma_mapping_error(dev, sqc_dma)) {
-		kfree(sqc);
-		return -ENOMEM;
+	if (qm->use_dma_api) {
+		sqc = kzalloc(sizeof(struct qm_sqc), GFP_KERNEL);
+		if (!sqc)
+			return -ENOMEM;
+		sqc_dma = dma_map_single(dev, sqc, sizeof(struct qm_sqc),
+					 DMA_TO_DEVICE);
+		if (dma_mapping_error(dev, sqc_dma)) {
+			kfree(sqc);
+			return -ENOMEM;
+		}
+	} else {
+		sqc = qm->reserve;
+		sqc_dma = qm->reserve_dma;
 	}
 
 	INIT_QC_COMMON(sqc, qp->sqe_dma, pasid);
@@ -1227,19 +1249,30 @@ static int qm_qp_ctx_cfg(struct hisi_qp *qp, int qp_id, int pasid)
 	sqc->w13 = QM_MK_SQC_W13(0, 1, qp->alg_type);
 
 	ret = qm_mb(qm, QM_MB_CMD_SQC, sqc_dma, qp_id, 0);
-	dma_unmap_single(dev, sqc_dma, sizeof(struct qm_sqc), DMA_TO_DEVICE);
-	kfree(sqc);
+	if (qm->use_dma_api) {
+		dma_unmap_single(dev, sqc_dma, sizeof(struct qm_sqc),
+				 DMA_TO_DEVICE);
+		kfree(sqc);
+	} else {
+		memset(sqc, 0, sizeof(struct qm_sqc));
+	}
 	if (ret)
 		return ret;
 
-	cqc = kzalloc(sizeof(struct qm_cqc), GFP_KERNEL);
-	if (!cqc)
-		return -ENOMEM;
-	cqc_dma = dma_map_single(dev, cqc, sizeof(struct qm_cqc),
-				 DMA_TO_DEVICE);
-	if (dma_mapping_error(dev, cqc_dma)) {
-		kfree(cqc);
-		return -ENOMEM;
+	if (qm->use_dma_api) {
+		cqc = kzalloc(sizeof(struct qm_cqc), GFP_KERNEL);
+		if (!cqc)
+			return -ENOMEM;
+
+		cqc_dma = dma_map_single(dev, cqc, sizeof(struct qm_cqc),
+					 DMA_TO_DEVICE);
+		if (dma_mapping_error(dev, cqc_dma)) {
+			kfree(cqc);
+			return -ENOMEM;
+		}
+	} else {
+		cqc = qm->reserve;
+		cqc_dma = qm->reserve_dma;
 	}
 
 	INIT_QC_COMMON(cqc, qp->cqe_dma, pasid);
@@ -1253,8 +1286,13 @@ static int qm_qp_ctx_cfg(struct hisi_qp *qp, int qp_id, int pasid)
 	cqc->dw6 = 1 << QM_CQ_PHASE_SHIFT | 1 << QM_CQ_FLAG_SHIFT;
 
 	ret = qm_mb(qm, QM_MB_CMD_CQC, cqc_dma, qp_id, 0);
-	dma_unmap_single(dev, cqc_dma, sizeof(struct qm_cqc), DMA_TO_DEVICE);
-	kfree(cqc);
+	if (qm->use_dma_api) {
+		dma_unmap_single(dev, cqc_dma, sizeof(struct qm_cqc),
+				 DMA_TO_DEVICE);
+		kfree(cqc);
+	} else {
+		memset(cqc, 0, sizeof(struct qm_cqc));
+	}
 
 	return ret;
 }
@@ -1390,6 +1428,284 @@ static void hisi_qm_cache_wb(struct hisi_qm *qm)
 	}
 }
 
+#ifdef CONFIG_CRYPTO_QM_UACCE
+static int __hisi_qm_start(struct hisi_qm *qm);
+
+static void qm_qp_event_notifier(struct hisi_qp *qp)
+{
+	uacce_wake_up(qp->uacce_q);
+}
+
+static int hisi_qm_get_available_instances(struct uacce *uacce)
+{
+	int i, ret;
+	struct hisi_qm *qm = uacce->priv;
+
+	read_lock(&qm->qps_lock);
+	for (i = 0, ret = 0; i < qm->qp_num; i++)
+		if (!qm->qp_array[i])
+			ret++;
+	read_unlock(&qm->qps_lock);
+
+	if (!qm->use_dma_api)
+		ret = (ret == qm->qp_num) ? 1 : 0;
+
+	return ret;
+}
+
+static int hisi_qm_uacce_get_queue(struct uacce *uacce, unsigned long arg,
+				   struct uacce_queue **q)
+{
+	struct hisi_qm *qm = uacce->priv;
+	struct hisi_qp *qp;
+	struct uacce_queue *wd_q;
+	u8 alg_type = 0;
+
+	qp = hisi_qm_create_qp(qm, alg_type);
+	if (IS_ERR(qp))
+		return PTR_ERR(qp);
+
+	wd_q = kzalloc(sizeof(struct uacce_queue), GFP_KERNEL);
+	if (!wd_q) {
+		hisi_qm_release_qp(qp);
+		return -ENOMEM;
+	}
+
+	wd_q->priv = qp;
+	wd_q->uacce = uacce;
+	*q = wd_q;
+	qp->uacce_q = wd_q;
+	qp->event_cb = qm_qp_event_notifier;
+	qp->pasid = arg;
+
+	return 0;
+}
+
+static void hisi_qm_uacce_put_queue(struct uacce_queue *q)
+{
+	struct hisi_qp *qp = q->priv;
+
+	/*
+	 * As put_queue is only called in uacce_mode=1, and only one queue can
+	 * be used in this mode. we flush all sqc cache back in put queue.
+	 */
+	hisi_qm_cache_wb(qp->qm);
+
+	/* need to stop hardware, but can not support in v1 */
+	hisi_qm_release_qp(qp);
+	kfree(q);
+}
+
+/* map sq/cq/doorbell to user space */
+static int hisi_qm_uacce_mmap(struct uacce_queue *q,
+			      struct vm_area_struct *vma,
+			      struct uacce_qfile_region *qfr)
+{
+	struct hisi_qp *qp = q->priv;
+	struct hisi_qm *qm = qp->qm;
+	size_t sz = vma->vm_end - vma->vm_start;
+	struct pci_dev *pdev = qm->pdev;
+	struct device *dev = &pdev->dev;
+	unsigned long vm_pgoff;
+	int ret;
+
+	switch (qfr->type) {
+	case UACCE_QFRT_MMIO:
+
+		/* Try to mmap corresponding pages size region */
+		if (qm->ver == QM_HW_V2)
+			WARN_ON(sz > PAGE_SIZE * (QM_DOORBELL_PAGE_NR +
+				QM_DOORBELL_SQ_CQ_BASE_V2 / PAGE_SIZE));
+		else
+			WARN_ON(sz > PAGE_SIZE * QM_DOORBELL_PAGE_NR);
+
+		vma->vm_flags |= VM_IO;
+
+		/*
+		 * Warning: This is not safe as multiple processes use the same
+		 * doorbell, v1/v2 hardware interface problem. It will be fixed
+		 * it in next version.
+		 */
+		return remap_pfn_range(vma, vma->vm_start,
+				       qm->phys_base >> PAGE_SHIFT,
+				       sz, pgprot_noncached(vma->vm_page_prot));
+	case UACCE_QFRT_DUS:
+		if (qm->use_dma_api) {
+			if (sz != qp->qdma.size) {
+				dev_warn(dev, "wrong queue size %ld vs %ld\n",
+					 sz, qp->qdma.size);
+				return -EINVAL;
+			}
+
+			/* dma_mmap_coherent() requires vm_pgoff as 0
+			 * restore vm_pfoff to initial value for mmap()
+			 */
+			vm_pgoff = vma->vm_pgoff;
+			vma->vm_pgoff = 0;
+			ret = dma_mmap_coherent(dev, vma, qp->qdma.va,
+						qp->qdma.dma, sz);
+			vma->vm_pgoff = vm_pgoff;
+			return ret;
+		}
+		return -EINVAL;
+
+	default:
+		return -EINVAL;
+	}
+}
+
+static int hisi_qm_uacce_start_queue(struct uacce_queue *q)
+{
+	int ret;
+	struct hisi_qm *qm = q->uacce->priv;
+	struct hisi_qp *qp = q->priv;
+
+	dev_dbg(&q->uacce->dev, "uacce queue start\n");
+
+	/* without SVA, iommu api should be called after user mmap dko */
+	if (!qm->use_dma_api) {
+		qm->qdma.dma = q->qfrs[UACCE_QFRT_DKO]->iova;
+		qm->qdma.va = q->qfrs[UACCE_QFRT_DKO]->kaddr;
+		qm->qdma.size = q->qfrs[UACCE_QFRT_DKO]->nr_pages >> PAGE_SHIFT;
+		dev_dbg(&q->uacce->dev,
+			"use dko space: va=%lx, dma=%lx, size=%llx\n",
+			(unsigned long)qm->qdma.va, (unsigned long)qm->qdma.dma,
+			qm->size);
+		ret = __hisi_qm_start(qm);
+		if (ret)
+			return ret;
+
+		qp->qdma.dma = q->qfrs[UACCE_QFRT_DUS]->iova;
+		qp->qdma.va = q->qfrs[UACCE_QFRT_DUS]->kaddr;
+		qp->qdma.size = q->qfrs[UACCE_QFRT_DUS]->nr_pages >> PAGE_SHIFT;
+	}
+
+	ret = hisi_qm_start_qp(qp, qp->pasid);
+	if (ret && !qm->use_dma_api)
+		hisi_qm_stop(qm);
+
+	return ret;
+}
+
+static void hisi_qm_uacce_stop_queue(struct uacce_queue *q)
+{
+	struct hisi_qm *qm = q->uacce->priv;
+	struct hisi_qp *qp = q->priv;
+
+	hisi_qm_stop_qp(qp);
+
+	if (!qm->use_dma_api) {
+		hisi_qm_stop(qm);
+		/*
+		 * In uacce_mode=1, we flush qm sqc here.
+		 * In uacce_fops_release, the working flow is stop_queue ->
+		 * unmap memory -> put_queue. Before unmapping memory, we
+		 * should flush sqc back to memory.
+		 */
+		hisi_qm_cache_wb(qm);
+	}
+}
+
+static int qm_set_sqctype(struct uacce_queue *q, u16 type)
+{
+	struct hisi_qm *qm = q->uacce->priv;
+	struct hisi_qp *qp = q->priv;
+
+	write_lock(&qm->qps_lock);
+	qp->alg_type = type;
+	write_unlock(&qm->qps_lock);
+
+	return 0;
+}
+
+static long hisi_qm_uacce_ioctl(struct uacce_queue *q, unsigned int cmd,
+				unsigned long arg)
+{
+	struct hisi_qp *qp = q->priv;
+	struct hisi_qp_ctx qp_ctx;
+
+	if (cmd == UACCE_CMD_QM_SET_QP_CTX) {
+		if (copy_from_user(&qp_ctx, (void __user *)arg,
+				   sizeof(struct hisi_qp_ctx)))
+			return -EFAULT;
+
+		if (qp_ctx.qc_type != 0 && qp_ctx.qc_type != 1)
+			return -EINVAL;
+
+		qm_set_sqctype(q, qp_ctx.qc_type);
+		qp_ctx.id = qp->qp_id;
+
+		if (copy_to_user((void __user *)arg, &qp_ctx,
+				 sizeof(struct hisi_qp_ctx)))
+			return -EFAULT;
+	} else {
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+/*
+ * the device is set the UACCE_DEV_SVA, but it will be cut if SVA patch is not
+ * available
+ */
+static struct uacce_ops uacce_qm_ops = {
+	.get_available_instances = hisi_qm_get_available_instances,
+	.get_queue = hisi_qm_uacce_get_queue,
+	.put_queue = hisi_qm_uacce_put_queue,
+	.start_queue = hisi_qm_uacce_start_queue,
+	.stop_queue = hisi_qm_uacce_stop_queue,
+	.mmap = hisi_qm_uacce_mmap,
+	.ioctl = hisi_qm_uacce_ioctl,
+};
+
+static int qm_register_uacce(struct hisi_qm *qm)
+{
+	struct pci_dev *pdev = qm->pdev;
+	struct uacce *uacce = &qm->uacce;
+	int i;
+
+	uacce->name = dev_name(&pdev->dev);
+	uacce->drv_name = pdev->driver->name;
+	uacce->pdev = &pdev->dev;
+	uacce->is_vf = pdev->is_virtfn;
+	uacce->priv = qm;
+	uacce->ops = &uacce_qm_ops;
+	uacce->algs = qm->algs;
+
+	if (qm->ver == QM_HW_V1)
+		uacce->api_ver = HISI_QM_API_VER_BASE;
+	else
+		uacce->api_ver = HISI_QM_API_VER2_BASE;
+
+	if (qm->use_dma_api) {
+		/*
+		 * Noiommu, SVA, and crypto-only modes are all using dma api.
+		 * So we don't use uacce to allocate memory. We allocate it
+		 * by ourself with the UACCE_DEV_DRVMAP_DUS flag.
+		 */
+		if (qm->use_sva) {
+			uacce->flags = UACCE_DEV_SVA;
+		} else {
+
+			uacce->flags = UACCE_DEV_NOIOMMU;
+			if (qm->ver == QM_HW_V1)
+				uacce->api_ver = HISI_QM_API_VER_BASE
+						 UACCE_API_VER_NOIOMMU_SUBFIX;
+			else
+				uacce->api_ver = HISI_QM_API_VER2_BASE
+						 UACCE_API_VER_NOIOMMU_SUBFIX;
+		}
+	}
+
+	for (i = 0; i < UACCE_QFRT_MAX; i++)
+		uacce->qf_pg_start[i] = UACCE_QFR_NA;
+
+
+	return uacce_register(uacce);
+}
+#endif
+
 /**
  * hisi_qm_init() - Initialize configures about qm.
  * @qm: The qm needing init.
@@ -1414,6 +1730,17 @@ int hisi_qm_init(struct hisi_qm *qm)
 		return -EINVAL;
 	}
 
+#ifdef CONFIG_CRYPTO_QM_UACCE
+	if (qm->use_uacce) {
+		dev_info(dev, "qm register to uacce\n");
+		ret = qm_register_uacce(qm);
+		if (ret < 0) {
+			dev_err(dev, "fail to register uacce (%d)\n", ret);
+			return ret;
+		}
+	}
+#endif
+
 	ret = pci_enable_device_mem(pdev);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "Failed to enable device mem!\n");
@@ -1426,6 +1753,10 @@ int hisi_qm_init(struct hisi_qm *qm)
 		goto err_disable_pcidev;
 	}
 
+#ifdef CONFIG_CRYPTO_QM_UACCE
+	qm->phys_base = pci_resource_start(pdev, PCI_BAR_2);
+	qm->size = pci_resource_len(qm->pdev, PCI_BAR_2);
+#endif
 	qm->io_base = ioremap(pci_resource_start(pdev, PCI_BAR_2),
 			      pci_resource_len(qm->pdev, PCI_BAR_2));
 	if (!qm->io_base) {
@@ -1497,6 +1828,11 @@ void hisi_qm_uninit(struct hisi_qm *qm)
 	iounmap(qm->io_base);
 	pci_release_mem_regions(pdev);
 	pci_disable_device(pdev);
+
+#ifdef CONFIG_CRYPTO_QM_UACCE
+	if (qm->use_uacce)
+		uacce_unregister(&qm->uacce);
+#endif
 }
 EXPORT_SYMBOL_GPL(hisi_qm_uninit);
 
@@ -1574,14 +1910,19 @@ static int qm_eq_ctx_cfg(struct hisi_qm *qm)
 
 	qm_init_eq_aeq_status(qm);
 
-	eqc = kzalloc(sizeof(struct qm_eqc), GFP_KERNEL);
-	if (!eqc)
-		return -ENOMEM;
-	eqc_dma = dma_map_single(dev, eqc, sizeof(struct qm_eqc),
-				 DMA_TO_DEVICE);
-	if (dma_mapping_error(dev, eqc_dma)) {
-		kfree(eqc);
-		return -ENOMEM;
+	if (qm->use_dma_api) {
+		eqc = kzalloc(sizeof(struct qm_eqc), GFP_KERNEL);
+		if (!eqc)
+			return -ENOMEM;
+		eqc_dma = dma_map_single(dev, eqc, sizeof(struct qm_eqc),
+					 DMA_TO_DEVICE);
+		if (dma_mapping_error(dev, eqc_dma)) {
+			kfree(eqc);
+			return -ENOMEM;
+		}
+	} else {
+		eqc = qm->reserve;
+		eqc_dma = qm->reserve_dma;
 	}
 
 	eqc->base_l = lower_32_bits(qm->eqe_dma);
@@ -1590,19 +1931,29 @@ static int qm_eq_ctx_cfg(struct hisi_qm *qm)
 		eqc->dw3 = QM_EQE_AEQE_SIZE;
 	eqc->dw6 = (QM_Q_DEPTH - 1) | (1 << QM_EQC_PHASE_SHIFT);
 	ret = qm_mb(qm, QM_MB_CMD_EQC, eqc_dma, 0, 0);
-	dma_unmap_single(dev, eqc_dma, sizeof(struct qm_eqc), DMA_TO_DEVICE);
-	kfree(eqc);
+	if (qm->use_dma_api) {
+		dma_unmap_single(dev, eqc_dma, sizeof(struct qm_eqc),
+				 DMA_TO_DEVICE);
+		kfree(eqc);
+	} else {
+		memset(eqc, 0, sizeof(struct qm_eqc));
+	}
 	if (ret)
 		return ret;
 
-	aeqc = kzalloc(sizeof(struct qm_aeqc), GFP_KERNEL);
-	if (!aeqc)
-		return -ENOMEM;
-	aeqc_dma = dma_map_single(dev, aeqc, sizeof(struct qm_aeqc),
-				  DMA_TO_DEVICE);
-	if (dma_mapping_error(dev, aeqc_dma)) {
-		kfree(aeqc);
-		return -ENOMEM;
+	if (qm->use_dma_api) {
+		aeqc = kzalloc(sizeof(struct qm_aeqc), GFP_KERNEL);
+		if (!aeqc)
+			return -ENOMEM;
+		aeqc_dma = dma_map_single(dev, aeqc, sizeof(struct qm_aeqc),
+					  DMA_TO_DEVICE);
+		if (dma_mapping_error(dev, aeqc_dma)) {
+			kfree(aeqc);
+			return -ENOMEM;
+		}
+	} else {
+		aeqc = qm->reserve;
+		aeqc_dma = qm->reserve_dma;
 	}
 
 	aeqc->base_l = lower_32_bits(qm->aeqe_dma);
@@ -1610,8 +1961,13 @@ static int qm_eq_ctx_cfg(struct hisi_qm *qm)
 	aeqc->dw6 = (QM_Q_DEPTH - 1) | (1 << QM_EQC_PHASE_SHIFT);
 
 	ret = qm_mb(qm, QM_MB_CMD_AEQC, aeqc_dma, 0, 0);
-	dma_unmap_single(dev, aeqc_dma, sizeof(struct qm_aeqc), DMA_TO_DEVICE);
-	kfree(aeqc);
+	if (qm->use_dma_api) {
+		dma_unmap_single(dev, aeqc_dma, sizeof(struct qm_aeqc),
+				 DMA_TO_DEVICE);
+		kfree(eqc);
+	} else {
+		memset(aeqc, 0, sizeof(struct qm_aeqc));
+	}
 
 	return ret;
 }
@@ -1622,6 +1978,9 @@ static int __hisi_qm_start(struct hisi_qm *qm)
 	struct device *dev = &pdev->dev;
 	size_t off = 0;
 	int ret;
+#ifdef CONFIG_CRYPTO_QM_UACCE
+	size_t dko_size;
+#endif
 
 #define QM_INIT_BUF(qm, type, num) do { \
 	(qm)->type = ((qm)->qdma.va + (off)); \
@@ -1648,6 +2007,10 @@ static int __hisi_qm_start(struct hisi_qm *qm)
 	QM_INIT_BUF(qm, aeqe, QM_Q_DEPTH);
 	QM_INIT_BUF(qm, sqc, qm->qp_num);
 	QM_INIT_BUF(qm, cqc, qm->qp_num);
+	/* get reserved dma memory */
+	qm->reserve = qm->qdma.va + off;
+	qm->reserve_dma = qm->qdma.dma + off;
+	off += PAGE_SIZE;
 
 	dev_dbg(dev, "init qm buffer:\n"
 		     " eqe	(%pK, %lx)\n"
@@ -1659,6 +2022,20 @@ static int __hisi_qm_start(struct hisi_qm *qm)
 		     qm->sqc, (unsigned long)qm->sqc_dma,
 		     qm->cqc, (unsigned long)qm->cqc_dma);
 
+#ifdef CONFIG_CRYPTO_QM_UACCE
+	/* check if the size exceed the DKO boundary */
+	if (qm->use_uacce && !qm->use_dma_api) {
+		WARN_ON(qm->uacce.qf_pg_start[UACCE_QFRT_DKO] == UACCE_QFR_NA);
+		dko_size = qm->uacce.qf_pg_start[UACCE_QFRT_DUS] -
+			   qm->uacce.qf_pg_start[UACCE_QFRT_DKO];
+		dko_size <<= PAGE_SHIFT;
+		dev_dbg(&qm->pdev->dev,
+			"kernel-only buffer used (0x%lx/0x%lx)\n", off,
+			dko_size);
+		if (off > dko_size)
+			return -EINVAL;
+	}
+#endif
 	ret = qm_eq_ctx_cfg(qm);
 	if (ret)
 		return ret;
@@ -1687,6 +2064,25 @@ int hisi_qm_start(struct hisi_qm *qm)
 {
 	struct device *dev = &qm->pdev->dev;
 
+#ifdef CONFIG_CRYPTO_QM_UACCE
+	struct uacce *uacce = &qm->uacce;
+	unsigned long dus_page_nr = 0;
+	unsigned long dko_page_nr = 0;
+	unsigned long mmio_page_nr = 0;
+
+	if (qm->use_uacce) {
+		dus_page_nr = (PAGE_SIZE - 1 + qm->sqe_size * QM_Q_DEPTH +
+			       sizeof(struct qm_cqe) * QM_Q_DEPTH) >> PAGE_SHIFT;
+		dko_page_nr = (PAGE_SIZE - 1 +
+			QMC_ALIGN(sizeof(struct qm_eqe) * QM_Q_DEPTH) +
+			QMC_ALIGN(sizeof(struct qm_aeqe) * QM_Q_DEPTH) +
+			QMC_ALIGN(sizeof(struct qm_sqc) * qm->qp_num) +
+			QMC_ALIGN(sizeof(struct qm_cqc) * qm->qp_num) +
+			/* let's reserve one page for possible usage */
+			PAGE_SIZE) >> PAGE_SHIFT;
+	}
+#endif
+
 	dev_dbg(dev, "qm start with %d queue pairs\n", qm->qp_num);
 
 	if (!qm->qp_num) {
@@ -1694,6 +2090,29 @@ int hisi_qm_start(struct hisi_qm *qm)
 		return -EINVAL;
 	}
 
+	/* reset qfr definition */
+#ifdef CONFIG_CRYPTO_QM_UACCE
+	if (qm->ver == QM_HW_V2)
+		mmio_page_nr = QM_DOORBELL_PAGE_NR +
+			       QM_DOORBELL_SQ_CQ_BASE_V2 / PAGE_SIZE;
+	else
+		mmio_page_nr = QM_DOORBELL_PAGE_NR;
+	if (qm->use_uacce && qm->use_dma_api) {
+		uacce->qf_pg_start[UACCE_QFRT_MMIO] = 0;
+		uacce->qf_pg_start[UACCE_QFRT_DKO]  = UACCE_QFR_NA;
+		uacce->qf_pg_start[UACCE_QFRT_DUS]  = mmio_page_nr;
+		uacce->qf_pg_start[UACCE_QFRT_SS]   = mmio_page_nr +
+						      dus_page_nr;
+	} else if (qm->use_uacce) {
+		uacce->qf_pg_start[UACCE_QFRT_MMIO] = 0;
+		uacce->qf_pg_start[UACCE_QFRT_DKO]  = mmio_page_nr;
+		uacce->qf_pg_start[UACCE_QFRT_DUS]  = mmio_page_nr +
+						      dko_page_nr;
+		uacce->qf_pg_start[UACCE_QFRT_SS]   = mmio_page_nr +
+						      dko_page_nr +
+						      dus_page_nr;
+	}
+#endif
 	if (!qm->qp_bitmap) {
 		qm->qp_bitmap = devm_kcalloc(dev, BITS_TO_LONGS(qm->qp_num),
 					     sizeof(long), GFP_KERNEL);
