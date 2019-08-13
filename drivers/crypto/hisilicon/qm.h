@@ -7,6 +7,12 @@
 #include <linux/iopoll.h>
 #include <linux/module.h>
 #include <linux/pci.h>
+#include <linux/uaccess.h>
+#ifdef CONFIG_CRYPTO_QM_UACCE
+#include <linux/uacce.h>
+#endif
+
+#include "qm_usr_if.h"
 
 /* qm user domain */
 #define QM_ARUSER_M_CFG_1		0x100088
@@ -74,6 +80,10 @@
 #define QM_BASE_CE			QM_ECC_1BIT
 
 #define QM_Q_DEPTH			1024
+
+/* page number for queue file region */
+#define QM_DOORBELL_PAGE_NR		1
+
 
 enum qp_state {
 	QP_STOP,
@@ -159,7 +169,18 @@ struct hisi_qm {
 	u32 error_mask;
 	u32 msi_mask;
 
-	bool use_dma_api;
+	const char *algs;
+	bool use_dma_api;	/* use dma or iommu api api */
+	bool use_uacce;		/* register to uacce */
+	bool use_sva;
+
+#ifdef CONFIG_CRYPTO_QM_UACCE
+	resource_size_t phys_base;
+	resource_size_t size;
+	struct uacce uacce;
+	void *reserve;
+	dma_addr_t reserve_dma;
+#endif
 };
 
 struct hisi_qp_status {
@@ -189,10 +210,16 @@ struct hisi_qp {
 	struct hisi_qp_ops *hw_ops;
 	void *qp_ctx;
 	void (*req_cb)(struct hisi_qp *qp, void *data);
+	void (*event_cb)(struct hisi_qp *qp);
 	struct work_struct work;
 	struct workqueue_struct *wq;
 
 	struct hisi_qm *qm;
+
+#ifdef CONFIG_CRYPTO_QM_UACCE
+	u16 pasid;
+	struct uacce_queue *uacce_q;
+#endif
 };
 
 int hisi_qm_init(struct hisi_qm *qm);
