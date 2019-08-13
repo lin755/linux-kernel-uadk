@@ -11,6 +11,7 @@
 #include <linux/pci.h>
 #include <linux/seq_file.h>
 #include <linux/topology.h>
+#include <linux/uacce.h>
 #include "zip.h"
 
 #define PCI_DEVICE_ID_ZIP_PF		0xa250
@@ -316,8 +317,13 @@ static void hisi_zip_set_user_domain_and_cache(struct hisi_zip *hisi_zip)
 	writel(AXUSER_BASE, base + HZIP_BD_RUSER_32_63);
 	writel(AXUSER_BASE, base + HZIP_SGL_RUSER_32_63);
 	writel(AXUSER_BASE, base + HZIP_BD_WUSER_32_63);
-	writel(AXUSER_BASE, base + HZIP_DATA_RUSER_32_63);
-	writel(AXUSER_BASE, base + HZIP_DATA_WUSER_32_63);
+	if (hisi_zip->qm.use_sva) {
+		writel(AXUSER_BASE | AXUSER_SSV, base + HZIP_DATA_RUSER_32_63);
+		writel(AXUSER_BASE | AXUSER_SSV, base + HZIP_DATA_WUSER_32_63);
+	} else {
+		writel(AXUSER_BASE, base + HZIP_DATA_RUSER_32_63);
+		writel(AXUSER_BASE, base + HZIP_DATA_WUSER_32_63);
+	}
 
 	/* let's open all compression/decompression cores */
 	writel(DECOMP_CHECK_ENABLE | ALL_COMP_DECOMP_EN,
@@ -676,15 +682,24 @@ static int hisi_zip_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	qm->dev_name = hisi_zip_name;
 	qm->fun_type = (pdev->device == PCI_DEVICE_ID_ZIP_PF) ? QM_HW_PF :
 								QM_HW_VF;
+	qm->algs = "zlib\ngzip\n";
+
 	switch (uacce_mode) {
 	case 0:
 		qm->use_dma_api = true;
+		qm->use_uacce = false;
 		break;
 	case 1:
 		qm->use_dma_api = false;
+#ifdef CONFIG_IOMMU_SVA
+		qm->use_dma_api = true;
+		qm->use_sva = true;
+#endif
+		qm->use_uacce = true;
 		break;
 	case 2:
 		qm->use_dma_api = true;
+		qm->use_uacce = true;
 		break;
 	default:
 		return -EINVAL;
@@ -970,6 +985,7 @@ static void hisi_zip_unregister_debugfs(void)
 static int __init hisi_zip_init(void)
 {
 	int ret;
+	bool reg_crypto = false;
 
 	hisi_zip_register_debugfs();
 
@@ -979,7 +995,14 @@ static int __init hisi_zip_init(void)
 		goto err_pci;
 	}
 
-	if (uacce_mode == 0 || uacce_mode == 2) {
+	if (uacce_mode == 0 || uacce_mode == 2)
+		reg_crypto = true;
+
+#ifdef CONFIG_IOMMU_SVA
+	reg_crypto = true;
+#endif
+
+	if (reg_crypto) {
 		ret = hisi_zip_register_to_crypto();
 		if (ret < 0) {
 			pr_err("Failed to register driver to crypto.\n");
@@ -999,7 +1022,15 @@ err_pci:
 
 static void __exit hisi_zip_exit(void)
 {
+	bool reg_crypto = false;
+
 	if (uacce_mode == 0 || uacce_mode == 2)
+		reg_crypto = true;
+#ifdef CONFIG_IOMMU_SVA
+	reg_crypto = true;
+#endif
+
+	if (reg_crypto)
 		hisi_zip_unregister_from_crypto();
 	pci_unregister_driver(&hisi_zip_pci_driver);
 	hisi_zip_unregister_debugfs();
