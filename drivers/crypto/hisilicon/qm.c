@@ -1659,18 +1659,38 @@ static struct uacce_ops uacce_qm_ops = {
 	.ioctl = hisi_qm_uacce_ioctl,
 };
 
+static struct uacce_interface interface = {
+       .name = "hisi-zip",
+       .ops = &uacce_qm_ops,
+};
+
 static int qm_register_uacce(struct hisi_qm *qm)
 {
 	struct pci_dev *pdev = qm->pdev;
-	struct uacce *uacce = &qm->uacce;
-	int i;
+	struct uacce *uacce;
+	unsigned int flags = 0;
+	//struct uacce_interface interface;
 
-	uacce->name = dev_name(&pdev->dev);
-	uacce->drv_name = pdev->driver->name;
-	uacce->pdev = &pdev->dev;
+	if ((qm->use_dma_api) && (qm->use_sva))
+		flags = UACCE_DEV_SVA;
+/*
+	if (qm->use_dma_api) {
+		if (qm->use_sva)
+			flags = UACCE_DEV_SVA;
+		else
+			flags = UACCE_DEV_NOIOMMU;
+	}
+*/
+	//strncpy(interface.name, pdev->driver->name, sizeof(interface.name));
+	interface.flags = flags;
+	//interface.ops = &uacce_qm_ops;
+
+	uacce = uacce_register(&pdev->dev, &interface);
+	if (IS_ERR(uacce))
+		return PTR_ERR(uacce);
+
 	uacce->is_vf = pdev->is_virtfn;
 	uacce->priv = qm;
-	uacce->ops = &uacce_qm_ops;
 	uacce->algs = qm->algs;
 
 	if (qm->ver == QM_HW_V1)
@@ -1678,6 +1698,7 @@ static int qm_register_uacce(struct hisi_qm *qm)
 	else
 		uacce->api_ver = HISI_QM_API_VER2_BASE;
 
+#if 0
 	if (qm->use_dma_api) {
 		/*
 		 * Noiommu, SVA, and crypto-only modes are all using dma api.
@@ -1685,10 +1706,10 @@ static int qm_register_uacce(struct hisi_qm *qm)
 		 * by ourself with the UACCE_DEV_DRVMAP_DUS flag.
 		 */
 		if (qm->use_sva) {
-			uacce->flags = UACCE_DEV_SVA;
+		//	uacce->flags = UACCE_DEV_SVA;
 		} else {
 
-			uacce->flags = UACCE_DEV_NOIOMMU;
+		//	uacce->flags = UACCE_DEV_NOIOMMU;
 			if (qm->ver == QM_HW_V1)
 				uacce->api_ver = HISI_QM_API_VER_BASE
 						 UACCE_API_VER_NOIOMMU_SUBFIX;
@@ -1697,12 +1718,14 @@ static int qm_register_uacce(struct hisi_qm *qm)
 						 UACCE_API_VER_NOIOMMU_SUBFIX;
 		}
 	}
+#endif
 
-	for (i = 0; i < UACCE_QFRT_MAX; i++)
-		uacce->qf_pg_start[i] = UACCE_QFR_NA;
+//	for (i = 0; i < UACCE_QFRT_MAX; i++)
+//		uacce->qf_pg_start[i] = UACCE_QFR_NA;
 
-
-	return uacce_register(uacce);
+	//return uacce_register(uacce);
+	qm->uacce = uacce;
+	return 0;
 }
 #endif
 
@@ -1831,7 +1854,7 @@ void hisi_qm_uninit(struct hisi_qm *qm)
 
 #ifdef CONFIG_CRYPTO_QM_UACCE
 	if (qm->use_uacce)
-		uacce_unregister(&qm->uacce);
+		uacce_unregister(qm->uacce);
 #endif
 }
 EXPORT_SYMBOL_GPL(hisi_qm_uninit);
@@ -2025,9 +2048,9 @@ static int __hisi_qm_start(struct hisi_qm *qm)
 #ifdef CONFIG_CRYPTO_QM_UACCE
 	/* check if the size exceed the DKO boundary */
 	if (qm->use_uacce && !qm->use_dma_api) {
-		WARN_ON(qm->uacce.qf_pg_start[UACCE_QFRT_DKO] == UACCE_QFR_NA);
-		dko_size = qm->uacce.qf_pg_start[UACCE_QFRT_DUS] -
-			   qm->uacce.qf_pg_start[UACCE_QFRT_DKO];
+		WARN_ON(qm->uacce->qf_pg_start[UACCE_QFRT_DKO] == UACCE_QFR_NA);
+		dko_size = qm->uacce->qf_pg_start[UACCE_QFRT_DUS] -
+			   qm->uacce->qf_pg_start[UACCE_QFRT_DKO];
 		dko_size <<= PAGE_SHIFT;
 		dev_dbg(&qm->pdev->dev,
 			"kernel-only buffer used (0x%lx/0x%lx)\n", off,
@@ -2065,7 +2088,7 @@ int hisi_qm_start(struct hisi_qm *qm)
 	struct device *dev = &qm->pdev->dev;
 
 #ifdef CONFIG_CRYPTO_QM_UACCE
-	struct uacce *uacce = &qm->uacce;
+	struct uacce *uacce = qm->uacce;
 	unsigned long dus_page_nr = 0;
 	unsigned long dko_page_nr = 0;
 	unsigned long mmio_page_nr = 0;
