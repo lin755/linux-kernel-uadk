@@ -177,7 +177,8 @@ struct hisi_qm {
 #ifdef CONFIG_CRYPTO_QM_UACCE
 	resource_size_t phys_base;
 	resource_size_t size;
-	struct uacce uacce;
+	//struct uacce uacce;
+	struct uacce *uacce;
 	void *reserve;
 	dma_addr_t reserve_dma;
 #endif
