@@ -1,0 +1,47 @@
+What:           /sys/class/uacce/hisi_zip-<n>/id
+Date:           Aug 2019
+KernelVersion:  5.3
+Contact:        linux-accelerators@lists.ozlabs.org
+Description:    Id of the device.
+
+What:           /sys/class/uacce/hisi_zip-<n>/api
+Date:           Aug 2019
+KernelVersion:  5.3
+Contact:        linux-accelerators@lists.ozlabs.org
+Description:    Api of the device, used by application to match the correct driver
+
+What:           /sys/class/uacce/hisi_zip-<n>/flags
+Date:           Aug 2019
+KernelVersion:  5.3
+Contact:        linux-accelerators@lists.ozlabs.org
+Description:    Attributes of the device, see UACCE_DEV_xxx flag defined in uacce.h
+
+What:           /sys/class/uacce/hisi_zip-<n>/available_instances
+Date:           Aug 2019
+KernelVersion:  5.3
+Contact:        linux-accelerators@lists.ozlabs.org
+Description:    Available instances left of the device
+
+What:           /sys/class/uacce/hisi_zip-<n>/algorithms
+Date:           Aug 2019
+KernelVersion:  5.3
+Contact:        linux-accelerators@lists.ozlabs.org
+Description:    Algorithms supported by this accelerator
+
+What:           /sys/class/uacce/hisi_zip-<n>/qfrs_offset
+Date:           Aug 2019
+KernelVersion:  5.3
+Contact:        linux-accelerators@lists.ozlabs.org
+Description:    Page offsets of each queue file regions
+
+What:           /sys/class/uacce/hisi_zip-<n>/numa_distance
+Date:           Aug 2019
+KernelVersion:  5.3
+Contact:        linux-accelerators@lists.ozlabs.org
+Description:    Distance of device node to cpu node
+
+What:           /sys/class/uacce/hisi_zip-<n>/node_id
+Date:           Aug 2019
+KernelVersion:  5.3
+Contact:        linux-accelerators@lists.ozlabs.org
+Description:    Id of the numa node
