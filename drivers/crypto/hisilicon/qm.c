@@ -1436,7 +1436,7 @@ static void qm_qp_event_notifier(struct hisi_qp *qp)
 	uacce_wake_up(qp->uacce_q);
 }
 
-static int hisi_qm_get_available_instances(struct uacce *uacce)
+static int hisi_qm_get_available_instances(struct uacce_device *uacce)
 {
 	int i, ret;
 	struct hisi_qm *qm = uacce->priv;
@@ -1453,7 +1453,7 @@ static int hisi_qm_get_available_instances(struct uacce *uacce)
 	return ret;
 }
 
-static int hisi_qm_uacce_get_queue(struct uacce *uacce, unsigned long arg,
+static int hisi_qm_uacce_get_queue(struct uacce_device *uacce, unsigned long arg,
 				   struct uacce_queue **q)
 {
 	struct hisi_qm *qm = uacce->priv;
@@ -1667,7 +1667,7 @@ static struct uacce_interface interface = {
 static int qm_register_uacce(struct hisi_qm *qm)
 {
 	struct pci_dev *pdev = qm->pdev;
-	struct uacce *uacce;
+	struct uacce_device *uacce;
 	unsigned int flags = 0;
 	//struct uacce_interface interface;
 
@@ -2088,7 +2088,7 @@ int hisi_qm_start(struct hisi_qm *qm)
 	struct device *dev = &qm->pdev->dev;
 
 #ifdef CONFIG_CRYPTO_QM_UACCE
-	struct uacce *uacce = qm->uacce;
+	struct uacce_device *uacce = qm->uacce;
 	unsigned long dus_page_nr = 0;
 	unsigned long dko_page_nr = 0;
 	unsigned long mmio_page_nr = 0;
