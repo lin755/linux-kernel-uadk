@@ -1433,7 +1433,7 @@ static int __hisi_qm_start(struct hisi_qm *qm);
 
 static void qm_qp_event_notifier(struct hisi_qp *qp)
 {
-	uacce_wake_up(qp->uacce_q);
+	wake_up_interruptible(&qp->uacce_q->wait);
 }
 
 static int hisi_qm_get_available_instances(struct uacce_device *uacce)
