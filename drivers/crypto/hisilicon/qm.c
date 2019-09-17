@@ -1454,17 +1454,18 @@ static int hisi_qm_get_available_instances(struct uacce_device *uacce)
 }
 
 static int hisi_qm_uacce_get_queue(struct uacce_device *uacce, unsigned long arg,
-				   struct uacce_queue **q)
+				   struct uacce_queue *q)
 {
 	struct hisi_qm *qm = uacce->priv;
 	struct hisi_qp *qp;
-	struct uacce_queue *wd_q;
+//	struct uacce_queue *wd_q;
 	u8 alg_type = 0;
 
 	qp = hisi_qm_create_qp(qm, alg_type);
 	if (IS_ERR(qp))
 		return PTR_ERR(qp);
 
+/*
 	wd_q = kzalloc(sizeof(struct uacce_queue), GFP_KERNEL);
 	if (!wd_q) {
 		hisi_qm_release_qp(qp);
@@ -1475,6 +1476,10 @@ static int hisi_qm_uacce_get_queue(struct uacce_device *uacce, unsigned long arg
 	wd_q->uacce = uacce;
 	*q = wd_q;
 	qp->uacce_q = wd_q;
+*/
+	q->priv = qp;
+	q->uacce = uacce;
+	qp->uacce_q = q;
 	qp->event_cb = qm_qp_event_notifier;
 	qp->pasid = arg;
 
@@ -1493,7 +1498,7 @@ static void hisi_qm_uacce_put_queue(struct uacce_queue *q)
 
 	/* need to stop hardware, but can not support in v1 */
 	hisi_qm_release_qp(qp);
-	kfree(q);
+//	kfree(q);
 }
 
 /* map sq/cq/doorbell to user space */
