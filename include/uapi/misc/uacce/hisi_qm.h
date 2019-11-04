@@ -1,12 +1,12 @@
 /* SPDX-License-Identifier: GPL-2.0+ WITH Linux-syscall-note */
-#ifndef HISI_QM_USR_IF_H
-#define HISI_QM_USR_IF_H
+#ifndef _UAPI_HISI_QM_H
+#define _UAPI_HISI_QM_H
 
 #include <linux/types.h>
 
 /**
  * struct hisi_qp_ctx - User data for hisi qp.
- * @id: Specifies which Turbo decode algorithm to use
+ * @id: qp_index return to user space
  * @qc_type: Accelerator algorithm type
  */
 struct hisi_qp_ctx {

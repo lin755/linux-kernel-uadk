@@ -12,12 +12,14 @@ static DEFINE_XARRAY_ALLOC(uacce_xa);
 
 static int uacce_start_queue(struct uacce_queue *q)
 {
-	int ret = -EINVAL;
+	int ret = 0;
 
 	mutex_lock(&uacce_mutex);
 
-	if (q->state != UACCE_Q_INIT)
+	if (q->state != UACCE_Q_INIT) {
+		ret = -EINVAL;
 		goto out_with_lock;
+	}
 
 	if (q->uacce->ops->start_queue) {
 		ret = q->uacce->ops->start_queue(q);
@@ -26,12 +28,10 @@ static int uacce_start_queue(struct uacce_queue *q)
 	}
 
 	q->state = UACCE_Q_STARTED;
-	mutex_unlock(&uacce_mutex);
-
-	return 0;
 
 out_with_lock:
 	mutex_unlock(&uacce_mutex);
+
 	return ret;
 }
 
@@ -121,7 +121,7 @@ static int uacce_fops_open(struct inode *inode, struct file *filep)
 	if (!uacce)
 		return -ENODEV;
 
-	if (!try_module_get(uacce->pdev->driver->owner))
+	if (!try_module_get(uacce->parent->driver->owner))
 		return -ENODEV;
 
 	q = kzalloc(sizeof(struct uacce_queue), GFP_KERNEL);
@@ -131,7 +131,7 @@ static int uacce_fops_open(struct inode *inode, struct file *filep)
 	}
 
 	if (uacce->flags & UACCE_DEV_SVA) {
-		handle = iommu_sva_bind_device(uacce->pdev, current->mm, uacce);
+		handle = iommu_sva_bind_device(uacce->parent, current->mm, uacce);
 		if (IS_ERR(handle))
 			goto out_with_mem;
 
@@ -154,10 +154,9 @@ static int uacce_fops_open(struct inode *inode, struct file *filep)
 	q->pasid = pasid;
 	q->handle = handle;
 	q->uacce = uacce;
-	memset(q->qfrs, 0, sizeof(q->qfrs));
+	q->state = UACCE_Q_INIT;
 	init_waitqueue_head(&q->wait);
 	filep->private_data = q;
-	q->state = UACCE_Q_INIT;
 
 	mutex_lock(&uacce->q_lock);
 	list_add(&q->list, &uacce->qs);
@@ -171,7 +170,7 @@ out_unbind:
 out_with_mem:
 	kfree(q);
 out_with_module:
-	module_put(uacce->pdev->driver->owner);
+	module_put(uacce->parent->driver->owner);
 	return ret;
 }
 
@@ -189,7 +188,7 @@ static int uacce_fops_release(struct inode *inode, struct file *filep)
 	list_del(&q->list);
 	mutex_unlock(&uacce->q_lock);
 	kfree(q);
-	module_put(uacce->pdev->driver->owner);
+	module_put(uacce->parent->driver->owner);
 
 	return 0;
 }
@@ -197,12 +196,12 @@ static int uacce_fops_release(struct inode *inode, struct file *filep)
 static void uacce_vma_close(struct vm_area_struct *vma)
 {
 	struct uacce_queue *q = vma->vm_private_data;
-	enum uacce_qfrt type = 0;
+	struct uacce_qfile_region *qfr = NULL;
 
 	if (vma->vm_pgoff < UACCE_QFRT_MAX)
-		type = vma->vm_pgoff;
+		qfr = q->qfrs[vma->vm_pgoff];
 
-	kfree(q->qfrs[type]);
+	kfree(qfr);
 }
 
 static const struct vm_operations_struct uacce_vm_ops = {
@@ -223,12 +222,6 @@ uacce_create_region(struct uacce_queue *q, struct vm_area_struct *vma,
 
 	qfr->type = type;
 	qfr->flags = flags;
-
-	if (vma->vm_flags & VM_READ)
-		qfr->prot |= IOMMU_READ;
-
-	if (vma->vm_flags & VM_WRITE)
-		qfr->prot |= IOMMU_WRITE;
 
 	if (flags & UACCE_QFRF_SELFMT) {
 		if (!uacce->ops->mmap) {
@@ -256,7 +249,7 @@ static int uacce_fops_mmap(struct file *filep, struct vm_area_struct *vma)
 	struct uacce_qfile_region *qfr;
 	enum uacce_qfrt type = 0;
 	unsigned int flags = 0;
-	int ret;
+	int ret = 0;
 
 	if (vma->vm_pgoff < UACCE_QFRT_MAX)
 		type = vma->vm_pgoff;
@@ -296,12 +289,9 @@ static int uacce_fops_mmap(struct file *filep, struct vm_area_struct *vma)
 	}
 	q->qfrs[type] = qfr;
 
-	mutex_unlock(&uacce_mutex);
-
-	return 0;
-
 out_with_lock:
 	mutex_unlock(&uacce_mutex);
+
 	return ret;
 }
 
@@ -353,7 +343,7 @@ static ssize_t numa_distance_show(struct device *dev,
 	struct uacce_device *uacce = to_uacce_device(dev);
 	int distance;
 
-	distance = node_distance(smp_processor_id(), uacce->pdev->numa_node);
+	distance = node_distance(smp_processor_id(), uacce->parent->numa_node);
 
 	return sprintf(buf, "%d\n", abs(distance));
 }
@@ -364,7 +354,7 @@ static ssize_t node_id_show(struct device *dev,
 	struct uacce_device *uacce = to_uacce_device(dev);
 	int node_id;
 
-	node_id = dev_to_node(uacce->pdev);
+	node_id = dev_to_node(uacce->parent);
 
 	return sprintf(buf, "%d\n", node_id);
 }
@@ -395,7 +385,7 @@ static ssize_t algorithms_show(struct device *dev,
 {
 	struct uacce_device *uacce = to_uacce_device(dev);
 
-	return sprintf(buf, "%s", uacce->algs);
+	return sprintf(buf, "%s\n", uacce->algs);
 }
 
 static ssize_t qfrt_mmio_size_show(struct device *dev,
@@ -469,7 +459,7 @@ struct uacce_device *uacce_register(struct device *parent,
 			flags &= ~UACCE_DEV_SVA;
 	}
 
-	uacce->pdev = parent;
+	uacce->parent = parent;
 	uacce->flags = flags;
 	uacce->ops = interface->ops;
 
@@ -492,22 +482,22 @@ struct uacce_device *uacce_register(struct device *parent,
 	uacce->dev.devt = MKDEV(MAJOR(uacce_devt), uacce->dev_id);
 	uacce->dev.class = uacce_class;
 	uacce->dev.groups = uacce_dev_groups;
-	uacce->dev.parent = uacce->pdev;
+	uacce->dev.parent = uacce->parent;
 	uacce->dev.release = uacce_release;
 	dev_set_name(&uacce->dev, "%s-%d", interface->name, uacce->dev_id);
 	ret = cdev_device_add(uacce->cdev, &uacce->dev);
 	if (ret)
-		goto err_with_xa;
+		goto err_with_cdev;
 
 	return uacce;
 
+err_with_cdev:
+	cdev_del(uacce->cdev);
 err_with_xa:
-	if (uacce->cdev)
-		cdev_del(uacce->cdev);
 	xa_erase(&uacce_xa, uacce->dev_id);
 err_with_uacce:
 	if (flags & UACCE_DEV_SVA)
-		iommu_dev_disable_feature(uacce->pdev, IOMMU_DEV_FEAT_SVA);
+		iommu_dev_disable_feature(uacce->parent, IOMMU_DEV_FEAT_SVA);
 	kfree(uacce);
 	return ERR_PTR(ret);
 }
@@ -519,9 +509,10 @@ EXPORT_SYMBOL_GPL(uacce_register);
  */
 void uacce_unregister(struct uacce_device *uacce)
 {
-	if (!uacce)
+	if (unlikely(ZERO_OR_NULL_PTR(uacce)))
 		return;
 
+	/* ensure no open queue remains */
 	mutex_lock(&uacce->q_lock);
 	if (!list_empty(&uacce->qs)) {
 		struct uacce_queue *q;
@@ -534,8 +525,9 @@ void uacce_unregister(struct uacce_device *uacce)
 	}
 	mutex_unlock(&uacce->q_lock);
 
+	/* disable sva now since no open queue */
 	if (uacce->flags & UACCE_DEV_SVA)
-		iommu_dev_disable_feature(uacce->pdev, IOMMU_DEV_FEAT_SVA);
+		iommu_dev_disable_feature(uacce->parent, IOMMU_DEV_FEAT_SVA);
 
 	cdev_device_del(uacce->cdev, &uacce->dev);
 	xa_erase(&uacce_xa, uacce->dev_id);
@@ -552,12 +544,10 @@ static int __init uacce_init(void)
 		return PTR_ERR(uacce_class);
 
 	ret = alloc_chrdev_region(&uacce_devt, 0, MINORMASK, UACCE_NAME);
-	if (ret) {
+	if (ret)
 		class_destroy(uacce_class);
-		return ret;
-	}
 
-	return 0;
+	return ret;
 }
 
 static __exit void uacce_exit(void)

@@ -1,13 +1,13 @@
 .. SPDX-License-Identifier: GPL-2.0
 
 Introduction of Uacce
-=========================
+---------------------
 
 Uacce (Unified/User-space-access-intended Accelerator Framework) targets to
 provide Shared Virtual Addressing (SVA) between accelerators and processes.
 So accelerator can access any data structure of the main cpu.
 This differs from the data sharing between cpu and io device, which share
-data content rather than address.
+only data content rather than address.
 Because of the unified address, hardware and user space of process can
 share the same virtual address in the communication.
 Uacce takes the hardware accelerator as a heterogeneous processor, while
@@ -81,7 +81,7 @@ application and all involved hardware.
 
 
 How does it work
-================
+----------------
 
 Uacce uses mmap and IOMMU to play the trick.
 
@@ -106,8 +106,9 @@ enum uacce_qfrt {
 	UACCE_QFRT_DUS = 1,
 };
 
-All regions are optional and differ from device type to type. The
-communication protocol is wrapped by the user driver.
+All regions are optional and differ from device type to type.
+Each region can be mmapped only once, otherwise -EEXIST returns.
+
 
 The device mmio region is mapped to the hardware mmio space. It is generally
 used for doorbell or other notification to the hardware. It is not fast enough
@@ -118,7 +119,8 @@ and device.
 
 
 The Uacce register API
------------------------
+----------------------
+
 The register API is defined in uacce.h.
 
 struct uacce_interface {

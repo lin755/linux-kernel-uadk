@@ -78,7 +78,6 @@
 /* page number for queue file region */
 #define QM_DOORBELL_PAGE_NR		1
 
-
 enum qp_state {
 	QP_STOP,
 };
@@ -167,7 +166,7 @@ struct hisi_qm {
 	bool use_dma_api;
 	bool use_sva;
 	resource_size_t phys_base;
-	resource_size_t size;
+	resource_size_t phys_size;
 	struct uacce_device *uacce;
 };
 
@@ -201,6 +200,7 @@ struct hisi_qp {
 	void (*event_cb)(struct hisi_qp *qp);
 	struct work_struct work;
 	struct workqueue_struct *wq;
+
 	struct hisi_qm *qm;
 	u16 pasid;
 	struct uacce_queue *uacce_q;

@@ -1,53 +1,53 @@
 What:           /sys/class/uacce/<dev_name>/id
-Date:           Oct 2019
+Date:           Nov 2019
 KernelVersion:  5.5
 Contact:        linux-accelerators@lists.ozlabs.org
 Description:    Id of the device.
 
 What:           /sys/class/uacce/<dev_name>/api
-Date:           Oct 2019
+Date:           Nov 2019
 KernelVersion:  5.5
 Contact:        linux-accelerators@lists.ozlabs.org
 Description:    Api of the device, used by application to match the correct driver
 
 What:           /sys/class/uacce/<dev_name>/flags
-Date:           Oct 2019
+Date:           Nov 2019
 KernelVersion:  5.5
 Contact:        linux-accelerators@lists.ozlabs.org
 Description:    Attributes of the device, see UACCE_DEV_xxx flag defined in uacce.h
 
 What:           /sys/class/uacce/<dev_name>/available_instances
-Date:           Oct 2019
+Date:           Nov 2019
 KernelVersion:  5.5
 Contact:        linux-accelerators@lists.ozlabs.org
 Description:    Available instances left of the device
 
 What:           /sys/class/uacce/<dev_name>/algorithms
-Date:           Oct 2019
+Date:           Nov 2019
 KernelVersion:  5.5
 Contact:        linux-accelerators@lists.ozlabs.org
 Description:    Algorithms supported by this accelerator
 
 What:           /sys/class/uacce/<dev_name>/qfrt_mmio_size
-Date:           Oct 2019
+Date:           Nov 2019
 KernelVersion:  5.5
 Contact:        linux-accelerators@lists.ozlabs.org
-Description:    Page size of mmio region queue file
+Description:    Page numbers of mmio region queue file
 
 What:           /sys/class/uacce/<dev_name>/qfrt_dus_size
-Date:           Oct 2019
+Date:           Nov 2019
 KernelVersion:  5.5
 Contact:        linux-accelerators@lists.ozlabs.org
-Description:    Page size of dus region queue file
+Description:    Page numbers of dus region queue file
 
 What:           /sys/class/uacce/<dev_name>/numa_distance
-Date:           Oct 2019
+Date:           Nov 2019
 KernelVersion:  5.5
 Contact:        linux-accelerators@lists.ozlabs.org
 Description:    Distance of device node to cpu node
 
 What:           /sys/class/uacce/<dev_name>/node_id
-Date:           Oct 2019
+Date:           Nov 2019
 KernelVersion:  5.5
 Contact:        linux-accelerators@lists.ozlabs.org
 Description:    Id of the numa node

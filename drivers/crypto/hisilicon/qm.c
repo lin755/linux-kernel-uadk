@@ -11,7 +11,7 @@
 #include <linux/slab.h>
 #include <linux/uacce.h>
 #include <linux/uaccess.h>
-#include <uapi/misc/uacce/qm.h>
+#include <uapi/misc/uacce/hisi_qm.h>
 #include "qm.h"
 
 /* eq/aeq irq enable */
@@ -1443,13 +1443,7 @@ static void hisi_qm_uacce_put_queue(struct uacce_queue *q)
 {
 	struct hisi_qp *qp = q->priv;
 
-	/*
-	 * As put_queue is only called in uacce_mode=1, and only one queue can
-	 * be used in this mode. we flush all sqc cache back in put queue.
-	 */
 	hisi_qm_cache_wb(qp->qm);
-
-	/* need to stop hardware, but can not support in v1 */
 	hisi_qm_release_qp(qp);
 }
 
@@ -1486,7 +1480,8 @@ static int hisi_qm_uacce_mmap(struct uacce_queue *q,
 		if (sz != qp->qdma.size)
 			return -EINVAL;
 
-		/* dma_mmap_coherent() requires vm_pgoff as 0
+		/*
+		 * dma_mmap_coherent() requires vm_pgoff as 0
 		 * restore vm_pfoff to initial value for mmap()
 		 */
 		vm_pgoff = vma->vm_pgoff;
@@ -1510,9 +1505,7 @@ static int hisi_qm_uacce_start_queue(struct uacce_queue *q)
 
 static void hisi_qm_uacce_stop_queue(struct uacce_queue *q)
 {
-	struct hisi_qp *qp = q->priv;
-
-	hisi_qm_stop_qp(qp);
+	hisi_qm_stop_qp(q->priv);
 }
 
 static int qm_set_sqctype(struct uacce_queue *q, u16 type)
@@ -1644,7 +1637,7 @@ int hisi_qm_init(struct hisi_qm *qm)
 	ret = pci_enable_device_mem(pdev);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "Failed to enable device mem!\n");
-		return ret;
+		goto err_unregister_uacce;
 	}
 
 	ret = pci_request_mem_regions(pdev, qm->dev_name);
@@ -1654,9 +1647,8 @@ int hisi_qm_init(struct hisi_qm *qm)
 	}
 
 	qm->phys_base = pci_resource_start(pdev, PCI_BAR_2);
-	qm->size = pci_resource_len(qm->pdev, PCI_BAR_2);
-	qm->io_base = ioremap(pci_resource_start(pdev, PCI_BAR_2),
-			      pci_resource_len(qm->pdev, PCI_BAR_2));
+	qm->phys_size = pci_resource_len(qm->pdev, PCI_BAR_2);
+	qm->io_base = ioremap(qm->phys_base, qm->phys_size);
 	if (!qm->io_base) {
 		ret = -EIO;
 		goto err_release_mem_regions;
@@ -1698,6 +1690,8 @@ err_release_mem_regions:
 	pci_release_mem_regions(pdev);
 err_disable_pcidev:
 	pci_disable_device(pdev);
+err_unregister_uacce:
+	uacce_unregister(qm->uacce);
 
 	return ret;
 }
@@ -1727,8 +1721,7 @@ void hisi_qm_uninit(struct hisi_qm *qm)
 	pci_release_mem_regions(pdev);
 	pci_disable_device(pdev);
 
-	if (qm->uacce)
-		uacce_unregister(qm->uacce);
+	uacce_unregister(qm->uacce);
 }
 EXPORT_SYMBOL_GPL(hisi_qm_uninit);
 

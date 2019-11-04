@@ -24,12 +24,10 @@ enum uacce_qfr_flag {
  * struct uacce_qfile_region - structure of queue file region
  * @type: type of the qfr
  * @flags: flags of qfr
- * @prot: qfr protection flag
  */
 struct uacce_qfile_region {
 	enum uacce_qfrt type;
 	enum uacce_qfr_flag flags;
-	u32 prot;
 };
 
 /**
@@ -113,7 +111,7 @@ struct uacce_queue {
  * @api_ver: api version
  * @qf_pg_size: page size of the queue file regions
  * @ops: pointer to the struct uacce_ops
- * @pdev: pointer to the parent device
+ * @parent: pointer to the parent device
  * @is_vf: whether virtual function
  * @flags: uacce attributes
  * @dev_id: id of the uacce device
@@ -129,7 +127,7 @@ struct uacce_device {
 	const char *api_ver;
 	unsigned long qf_pg_size[UACCE_QFRT_MAX];
 	struct uacce_ops *ops;
-	struct device *pdev;
+	struct device *parent;
 	bool is_vf;
 	u32 flags;
 	u32 dev_id;
