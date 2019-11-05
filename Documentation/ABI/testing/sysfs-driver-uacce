@@ -40,6 +40,12 @@ KernelVersion:  5.5
 Contact:        linux-accelerators@lists.ozlabs.org
 Description:    Page numbers of dus region queue file
 
+What:           /sys/class/uacce/<dev_name>/numa_distance
+Date:           Nov 2019
+KernelVersion:  5.5
+Contact:        linux-accelerators@lists.ozlabs.org
+Description:    Distance of device node to cpu node
+
 What:           /sys/class/uacce/<dev_name>/node_id
 Date:           Nov 2019
 KernelVersion:  5.5
