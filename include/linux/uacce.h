@@ -13,21 +13,19 @@ struct uacce_queue;
 struct uacce_device;
 
 /**
- * enum uacce_qfr_flag: queue file flag:
+ * UACCE queue file flag:
  * @UACCE_QFRF_SELFMT: self maintained qfr
  */
-enum uacce_qfr_flag {
-	UACCE_QFRF_SELFMT = BIT(0),
-};
+#define UACCE_QFRF_SELFMT       BIT(0)
 
 /**
  * struct uacce_qfile_region - structure of queue file region
  * @type: type of the qfr
- * @flags: flags of qfr
+ * @flags: flags of the region
  */
 struct uacce_qfile_region {
 	enum uacce_qfrt type;
-	enum uacce_qfr_flag flags;
+	unsigned int flags;
 };
 
 /**
@@ -63,7 +61,7 @@ struct uacce_ops {
  */
 struct uacce_interface {
 	char name[UACCE_MAX_NAME_SIZE];
-	enum uacce_dev_flag flags;
+	unsigned int flags;
 	const struct uacce_ops *ops;
 };
 

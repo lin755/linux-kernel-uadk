@@ -16,14 +16,12 @@
 #define UACCE_CMD_PUT_Q		_IO('W', 1)
 
 /**
- * enum uacce_dev_flag: Device flags:
+ * UACCE Device flags:
  * @UACCE_DEV_SVA: Shared Virtual Addresses
  *		   Support PASID
  *		   Support device page faults (PCI PRI or SMMU Stall)
  */
-enum uacce_dev_flag {
-	UACCE_DEV_SVA = BIT(0),
-};
+#define UACCE_DEV_SVA       	BIT(0)
 
 /**
  * enum uacce_qfrt: qfrt type
