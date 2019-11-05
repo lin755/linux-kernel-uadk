@@ -38,10 +38,7 @@ struct uacce_qfile_region {
  * @start_queue: make the queue start work after get_queue
  * @stop_queue: make the queue stop work before put_queue
  * @is_q_updated: check whether the task is finished
- * @mask_notify: mask the task irq of queue
  * @mmap: mmap addresses of queue to user space
- * @reset: reset the uacce device
- * @reset_queue: reset the queue
  * @ioctl: ioctl for user space users of the queue
  */
 struct uacce_ops {
@@ -52,11 +49,8 @@ struct uacce_ops {
 	int (*start_queue)(struct uacce_queue *q);
 	void (*stop_queue)(struct uacce_queue *q);
 	int (*is_q_updated)(struct uacce_queue *q);
-	void (*mask_notify)(struct uacce_queue *q, int event_mask);
 	int (*mmap)(struct uacce_queue *q, struct vm_area_struct *vma,
 		    struct uacce_qfile_region *qfr);
-	int (*reset)(struct uacce_device *uacce);
-	int (*reset_queue)(struct uacce_queue *q);
 	long (*ioctl)(struct uacce_queue *q, unsigned int cmd,
 		      unsigned long arg);
 };

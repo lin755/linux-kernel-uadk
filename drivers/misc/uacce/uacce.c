@@ -337,17 +337,6 @@ static ssize_t api_show(struct device *dev,
 	return sprintf(buf, "%s\n", uacce->api_ver);
 }
 
-static ssize_t numa_distance_show(struct device *dev,
-				  struct device_attribute *attr, char *buf)
-{
-	struct uacce_device *uacce = to_uacce_device(dev);
-	int distance;
-
-	distance = node_distance(smp_processor_id(), uacce->parent->numa_node);
-
-	return sprintf(buf, "%d\n", abs(distance));
-}
-
 static ssize_t node_id_show(struct device *dev,
 			    struct device_attribute *attr, char *buf)
 {
@@ -388,8 +377,8 @@ static ssize_t algorithms_show(struct device *dev,
 	return sprintf(buf, "%s\n", uacce->algs);
 }
 
-static ssize_t qfrt_mmio_size_show(struct device *dev,
-				   struct device_attribute *attr, char *buf)
+static ssize_t region_mmio_size_show(struct device *dev,
+				     struct device_attribute *attr, char *buf)
 {
 	struct uacce_device *uacce = to_uacce_device(dev);
 
@@ -397,8 +386,8 @@ static ssize_t qfrt_mmio_size_show(struct device *dev,
 		       uacce->qf_pg_size[UACCE_QFRT_MMIO] << PAGE_SHIFT);
 }
 
-static ssize_t qfrt_dus_size_show(struct device *dev,
-				  struct device_attribute *attr, char *buf)
+static ssize_t region_dus_size_show(struct device *dev,
+				    struct device_attribute *attr, char *buf)
 {
 	struct uacce_device *uacce = to_uacce_device(dev);
 
@@ -408,24 +397,22 @@ static ssize_t qfrt_dus_size_show(struct device *dev,
 
 static DEVICE_ATTR_RO(id);
 static DEVICE_ATTR_RO(api);
-static DEVICE_ATTR_RO(numa_distance);
 static DEVICE_ATTR_RO(node_id);
 static DEVICE_ATTR_RO(flags);
 static DEVICE_ATTR_RO(available_instances);
 static DEVICE_ATTR_RO(algorithms);
-static DEVICE_ATTR_RO(qfrt_mmio_size);
-static DEVICE_ATTR_RO(qfrt_dus_size);
+static DEVICE_ATTR_RO(region_mmio_size);
+static DEVICE_ATTR_RO(region_dus_size);
 
 static struct attribute *uacce_dev_attrs[] = {
 	&dev_attr_id.attr,
 	&dev_attr_api.attr,
 	&dev_attr_node_id.attr,
-	&dev_attr_numa_distance.attr,
 	&dev_attr_flags.attr,
 	&dev_attr_available_instances.attr,
 	&dev_attr_algorithms.attr,
-	&dev_attr_qfrt_mmio_size.attr,
-	&dev_attr_qfrt_dus_size.attr,
+	&dev_attr_region_mmio_size.attr,
+	&dev_attr_region_dus_size.attr,
 	NULL,
 };
 ATTRIBUTE_GROUPS(uacce_dev);
