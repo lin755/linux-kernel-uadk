@@ -56,12 +56,10 @@ struct uacce_ops {
 };
 
 /**
- * struct uacce_interface
+ * struct uacce_interface - interface required for uacce_register()
  * @name: the uacce device name.  Will show up in sysfs
  * @flags: uacce device attributes
  * @ops: pointer to the struct uacce_ops
- *
- * This structure is used for the uacce_register()
  */
 struct uacce_interface {
 	char name[UACCE_MAX_NAME_SIZE];

@@ -425,9 +425,12 @@ static void uacce_release(struct device *dev)
 }
 
 /**
- * uacce_register - register an accelerator
+ * uacce_register() - register an accelerator
  * @parent: pointer of uacce parent device
  * @interface: pointer of uacce_interface for register
+ *
+ * Return 0 if register succeeded, or an error.
+ * Need check returned negotiated uacce->flag
  */
 struct uacce_device *uacce_register(struct device *parent,
 				    struct uacce_interface *interface)
@@ -491,7 +494,7 @@ err_with_uacce:
 EXPORT_SYMBOL_GPL(uacce_register);
 
 /**
- * uacce_unregister - unregisters an accelerator
+ * uacce_unregister() - unregisters an accelerator
  * @uacce: the accelerator to unregister
  */
 void uacce_unregister(struct uacce_device *uacce)
@@ -512,7 +515,7 @@ void uacce_unregister(struct uacce_device *uacce)
 	}
 	mutex_unlock(&uacce->q_lock);
 
-	/* disable sva now since no open queue */
+	/* disable sva now since no opened queues */
 	if (uacce->flags & UACCE_DEV_SVA)
 		iommu_dev_disable_feature(uacce->parent, IOMMU_DEV_FEAT_SVA);
 
