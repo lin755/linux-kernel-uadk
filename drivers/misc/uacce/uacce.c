@@ -198,7 +198,7 @@ static void uacce_vma_close(struct vm_area_struct *vma)
 	struct uacce_queue *q = vma->vm_private_data;
 	struct uacce_qfile_region *qfr = NULL;
 
-	if (vma->vm_pgoff < UACCE_QFRT_MAX)
+	if (vma->vm_pgoff < UACCE_MAX_REGION)
 		qfr = q->qfrs[vma->vm_pgoff];
 
 	kfree(qfr);
@@ -251,7 +251,7 @@ static int uacce_fops_mmap(struct file *filep, struct vm_area_struct *vma)
 	unsigned int flags = 0;
 	int ret = 0;
 
-	if (vma->vm_pgoff < UACCE_QFRT_MAX)
+	if (vma->vm_pgoff < UACCE_MAX_REGION)
 		type = vma->vm_pgoff;
 
 	vma->vm_flags |= VM_DONTCOPY | VM_DONTEXPAND | VM_WIPEONFORK;

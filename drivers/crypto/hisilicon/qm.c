@@ -1547,7 +1547,7 @@ static long hisi_qm_uacce_ioctl(struct uacce_queue *q, unsigned int cmd,
 	return 0;
 }
 
-static struct uacce_ops uacce_qm_ops = {
+static const struct uacce_ops uacce_qm_ops = {
 	.get_available_instances = hisi_qm_get_available_instances,
 	.get_queue = hisi_qm_uacce_get_queue,
 	.put_queue = hisi_qm_uacce_put_queue,

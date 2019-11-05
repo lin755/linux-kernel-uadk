@@ -6,7 +6,7 @@
 #include <uapi/misc/uacce/uacce.h>
 
 #define UACCE_NAME		"uacce"
-#define UACCE_QFRT_MAX		16
+#define UACCE_MAX_REGION	16
 #define UACCE_MAX_NAME_SIZE	64
 
 struct uacce_queue;
@@ -66,7 +66,7 @@ struct uacce_ops {
 struct uacce_interface {
 	char name[UACCE_MAX_NAME_SIZE];
 	enum uacce_dev_flag flags;
-	struct uacce_ops *ops;
+	const struct uacce_ops *ops;
 };
 
 enum uacce_q_state {
@@ -95,7 +95,7 @@ struct uacce_queue {
 	pid_t pid;
 	struct iommu_sva *handle;
 	struct list_head list;
-	struct uacce_qfile_region *qfrs[UACCE_QFRT_MAX];
+	struct uacce_qfile_region *qfrs[UACCE_MAX_REGION];
 	enum uacce_q_state state;
 };
 
@@ -119,8 +119,8 @@ struct uacce_queue {
 struct uacce_device {
 	const char *algs;
 	const char *api_ver;
-	unsigned long qf_pg_size[UACCE_QFRT_MAX];
-	struct uacce_ops *ops;
+	const struct uacce_ops *ops;
+	unsigned long qf_pg_size[UACCE_MAX_REGION];
 	struct device *parent;
 	bool is_vf;
 	u32 flags;
