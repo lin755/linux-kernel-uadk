@@ -221,7 +221,6 @@ uacce_create_region(struct uacce_queue *q, struct vm_area_struct *vma,
 		return ERR_PTR(-ENOMEM);
 
 	qfr->type = type;
-	qfr->flags = flags;
 
 	if (flags & UACCE_QFRF_SELFMT) {
 		if (!uacce->ops->mmap) {
@@ -247,12 +246,14 @@ static int uacce_fops_mmap(struct file *filep, struct vm_area_struct *vma)
 	struct uacce_queue *q = filep->private_data;
 	struct uacce_device *uacce = q->uacce;
 	struct uacce_qfile_region *qfr;
-	enum uacce_qfrt type = 0;
+	enum uacce_qfrt type = UACCE_MAX_REGION;
 	unsigned int flags = 0;
 	int ret = 0;
 
 	if (vma->vm_pgoff < UACCE_MAX_REGION)
 		type = vma->vm_pgoff;
+	else
+		return -EINVAL;
 
 	vma->vm_flags |= VM_DONTCOPY | VM_DONTEXPAND | VM_WIPEONFORK;
 	vma->vm_ops = &uacce_vm_ops;
@@ -278,8 +279,8 @@ static int uacce_fops_mmap(struct file *filep, struct vm_area_struct *vma)
 		break;
 
 	default:
-		WARN_ON(&uacce->dev);
-		break;
+		ret = -EINVAL;
+		goto out_with_lock;
 	}
 
 	qfr = uacce_create_region(q, vma, type, flags);
@@ -443,7 +444,7 @@ static void uacce_release(struct device *dev)
  * @interface: pointer of uacce_interface for register
  *
  * Return 0 if register succeeded, or an error.
- * Need check returned negotiated uacce->flag
+ * Need check returned negotiated uacce->flags
  */
 struct uacce_device *uacce_register(struct device *parent,
 				    struct uacce_interface *interface)

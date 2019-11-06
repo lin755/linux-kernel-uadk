@@ -21,11 +21,9 @@ struct uacce_device;
 /**
  * struct uacce_qfile_region - structure of queue file region
  * @type: type of the qfr
- * @flags: flags of the region
  */
 struct uacce_qfile_region {
 	enum uacce_qfrt type;
-	unsigned int flags;
 };
 
 /**
