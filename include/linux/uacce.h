@@ -13,12 +13,6 @@ struct uacce_queue;
 struct uacce_device;
 
 /**
- * UACCE queue file flag:
- * @UACCE_QFRF_SELFMT: self maintained qfr
- */
-#define UACCE_QFRF_SELFMT       BIT(0)
-
-/**
  * struct uacce_qfile_region - structure of queue file region
  * @type: type of the qfr
  */

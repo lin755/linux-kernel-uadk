@@ -208,46 +208,12 @@ static const struct vm_operations_struct uacce_vm_ops = {
 	.close = uacce_vma_close,
 };
 
-static struct uacce_qfile_region *
-uacce_create_region(struct uacce_queue *q, struct vm_area_struct *vma,
-		    enum uacce_qfrt type, unsigned int flags)
-{
-	struct uacce_device *uacce = q->uacce;
-	struct uacce_qfile_region *qfr;
-	int ret = -ENOMEM;
-
-	qfr = kzalloc(sizeof(*qfr), GFP_KERNEL);
-	if (!qfr)
-		return ERR_PTR(-ENOMEM);
-
-	qfr->type = type;
-
-	if (flags & UACCE_QFRF_SELFMT) {
-		if (!uacce->ops->mmap) {
-			ret = -EINVAL;
-			goto err_with_qfr;
-		}
-
-		ret = uacce->ops->mmap(q, vma, qfr);
-		if (ret)
-			goto err_with_qfr;
-		return qfr;
-	}
-
-	return qfr;
-
-err_with_qfr:
-	kfree(qfr);
-	return ERR_PTR(ret);
-}
-
 static int uacce_fops_mmap(struct file *filep, struct vm_area_struct *vma)
 {
 	struct uacce_queue *q = filep->private_data;
 	struct uacce_device *uacce = q->uacce;
 	struct uacce_qfile_region *qfr;
 	enum uacce_qfrt type = UACCE_MAX_REGION;
-	unsigned int flags = 0;
 	int ret = 0;
 
 	if (vma->vm_pgoff < UACCE_MAX_REGION)
@@ -255,9 +221,14 @@ static int uacce_fops_mmap(struct file *filep, struct vm_area_struct *vma)
 	else
 		return -EINVAL;
 
+	qfr = kzalloc(sizeof(*qfr), GFP_KERNEL);
+	if (!qfr)
+		return -ENOMEM;
+
 	vma->vm_flags |= VM_DONTCOPY | VM_DONTEXPAND | VM_WIPEONFORK;
 	vma->vm_ops = &uacce_vm_ops;
 	vma->vm_private_data = q;
+	qfr->type = type;
 
 	mutex_lock(&uacce_mutex);
 
@@ -268,13 +239,20 @@ static int uacce_fops_mmap(struct file *filep, struct vm_area_struct *vma)
 
 	switch (type) {
 	case UACCE_QFRT_MMIO:
-		flags = UACCE_QFRF_SELFMT;
+		if (uacce->ops->mmap) {
+			ret = uacce->ops->mmap(q, vma, qfr);
+			if (ret)
+				goto out_with_lock;
+		}
 		break;
 
 	case UACCE_QFRT_DUS:
 		if (uacce->flags & UACCE_DEV_SVA) {
-			flags = UACCE_QFRF_SELFMT;
-			break;
+			if (uacce->ops->mmap) {
+				ret = uacce->ops->mmap(q, vma, qfr);
+				if (ret)
+					goto out_with_lock;
+			}
 		}
 		break;
 
@@ -283,15 +261,11 @@ static int uacce_fops_mmap(struct file *filep, struct vm_area_struct *vma)
 		goto out_with_lock;
 	}
 
-	qfr = uacce_create_region(q, vma, type, flags);
-	if (IS_ERR(qfr)) {
-		ret = PTR_ERR(qfr);
-		goto out_with_lock;
-	}
 	q->qfrs[type] = qfr;
 
 out_with_lock:
 	mutex_unlock(&uacce_mutex);
+	kfree(qfr);
 
 	return ret;
 }
