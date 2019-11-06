@@ -1557,7 +1557,7 @@ static const struct uacce_ops uacce_qm_ops = {
 	.ioctl = hisi_qm_uacce_ioctl,
 };
 
-static int qm_register_uacce(struct hisi_qm *qm)
+static int hisi_qm_register_uacce(struct hisi_qm *qm)
 {
 	struct pci_dev *pdev = qm->pdev;
 	struct uacce_device *uacce;
@@ -1569,6 +1569,25 @@ static int qm_register_uacce(struct hisi_qm *qm)
 	};
 
 	strncpy(interface.name, pdev->driver->name, sizeof(interface.name));
+
+	interface.is_vf = pdev->is_virtfn;
+	interface.priv = qm;
+	interface.algs = qm->algs;
+
+	if (qm->ver == QM_HW_V1) {
+		mmio_page_nr = QM_DOORBELL_PAGE_NR;
+		interface.api_ver = HISI_QM_API_VER_BASE;
+	} else {
+		mmio_page_nr = QM_DOORBELL_PAGE_NR +
+			QM_DOORBELL_SQ_CQ_BASE_V2 / PAGE_SIZE;
+		interface.api_ver = HISI_QM_API_VER2_BASE;
+	}
+
+	dus_page_nr = (PAGE_SIZE - 1 + qm->sqe_size * QM_Q_DEPTH +
+		       sizeof(struct qm_cqe) * QM_Q_DEPTH) >> PAGE_SHIFT;
+
+	interface.qf_pg_size[UACCE_QFRT_MMIO] = mmio_page_nr;
+	interface.qf_pg_size[UACCE_QFRT_DUS]  = dus_page_nr;
 
 	uacce = uacce_register(&pdev->dev, &interface);
 	if (IS_ERR(uacce))
@@ -1582,29 +1601,11 @@ static int qm_register_uacce(struct hisi_qm *qm)
 		return -EINVAL;
 	}
 
-	uacce->is_vf = pdev->is_virtfn;
-	uacce->priv = qm;
-	uacce->algs = qm->algs;
-
-	if (qm->ver == QM_HW_V1) {
-		mmio_page_nr = QM_DOORBELL_PAGE_NR;
-		uacce->api_ver = HISI_QM_API_VER_BASE;
-	} else {
-		mmio_page_nr = QM_DOORBELL_PAGE_NR +
-			QM_DOORBELL_SQ_CQ_BASE_V2 / PAGE_SIZE;
-		uacce->api_ver = HISI_QM_API_VER2_BASE;
-	}
-
-	dus_page_nr = (PAGE_SIZE - 1 + qm->sqe_size * QM_Q_DEPTH +
-		       sizeof(struct qm_cqe) * QM_Q_DEPTH) >> PAGE_SHIFT;
-
-	uacce->qf_pg_size[UACCE_QFRT_MMIO] = mmio_page_nr;
-	uacce->qf_pg_size[UACCE_QFRT_DUS]  = dus_page_nr;
-
 	qm->uacce = uacce;
 
 	return 0;
 }
+EXPORT_SYMBOL_GPL(hisi_qm_register_uacce);
 
 /**
  * hisi_qm_init() - Initialize configures about qm.
@@ -1629,10 +1630,6 @@ int hisi_qm_init(struct hisi_qm *qm)
 	default:
 		return -EINVAL;
 	}
-
-	ret = qm_register_uacce(qm);
-	if (ret < 0)
-		dev_warn(&pdev->dev, "fail to register uacce (%d)\n", ret);
 
 	ret = pci_enable_device_mem(pdev);
 	if (ret < 0) {

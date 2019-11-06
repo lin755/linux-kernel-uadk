@@ -54,6 +54,11 @@ struct uacce_ops {
 struct uacce_interface {
 	char name[UACCE_MAX_NAME_SIZE];
 	unsigned int flags;
+	bool is_vf;
+	unsigned long qf_pg_size[UACCE_MAX_REGION];
+	const char *api_ver;
+	void *priv;
+	const char *algs;
 	const struct uacce_ops *ops;
 };
 

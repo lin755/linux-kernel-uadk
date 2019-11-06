@@ -445,6 +445,14 @@ struct uacce_device *uacce_register(struct device *parent,
 			flags &= ~UACCE_DEV_SVA;
 	}
 
+	uacce->is_vf = interface->is_vf;
+	uacce->priv = interface->priv;
+	uacce->algs = interface->algs;
+	uacce->api_ver = interface->api_ver;
+	uacce->qf_pg_size[UACCE_QFRT_MMIO] =
+				interface->qf_pg_size[UACCE_QFRT_MMIO];
+	uacce->qf_pg_size[UACCE_QFRT_DUS] =
+				interface->qf_pg_size[UACCE_QFRT_DUS];
 	uacce->parent = parent;
 	uacce->flags = flags;
 	uacce->ops = interface->ops;

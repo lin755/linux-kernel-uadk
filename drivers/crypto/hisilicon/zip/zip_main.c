@@ -724,6 +724,10 @@ static int hisi_zip_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	hisi_zip_add_to_list(hisi_zip);
 
+	ret = hisi_qm_register_uacce(qm);
+	if (ret < 0)
+		dev_warn(&pdev->dev, "fail to register uacce (%d)\n", ret);
+
 	return 0;
 
 err_qm_uninit:
