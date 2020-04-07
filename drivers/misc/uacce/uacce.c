@@ -158,6 +158,7 @@ static void uacce_unbind_queue(struct uacce_queue *q)
 	if (!q->handle)
 		return;
 	iommu_sva_unbind_device(q->handle);
+	q->handle = 0;
 }
 
 static int uacce_fops_open(struct inode *inode, struct file *filep)
@@ -218,14 +219,6 @@ static int uacce_fops_release(struct inode *inode, struct file *filep)
 	return 0;
 }
 
-static vm_fault_t uacce_vma_fault(struct vm_fault *vmf)
-{
-	if (vmf->flags & (FAULT_FLAG_MKWRITE | FAULT_FLAG_WRITE))
-		return VM_FAULT_SIGBUS;
-
-	return 0;
-}
-
 static void uacce_vma_close(struct vm_area_struct *vma)
 {
 	struct uacce_queue *q = vma->vm_private_data;
@@ -247,7 +240,6 @@ static void uacce_vma_close(struct vm_area_struct *vma)
 }
 
 static const struct vm_operations_struct uacce_vm_ops = {
-	.fault = uacce_vma_fault,
 	.close = uacce_vma_close,
 };
 
