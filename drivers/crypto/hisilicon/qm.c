@@ -1164,6 +1164,8 @@ struct hisi_qp *hisi_qm_create_qp(struct hisi_qm *qm, u8 alg_type)
 
 		dev_dbg(dev, "allocate qp dma buf(va=%pK, dma=%pad, size=%zx)\n",
 			qp->qdma.va, &qp->qdma.dma, qp->qdma.size);
+		pr_err("allocate qp dma buf(va=%pK, dma=%pad, size=%zx)\n",
+			qp->qdma.va, &qp->qdma.dma, qp->qdma.size);
 	}
 
 	qp->qp_id = qp_id;
@@ -1232,6 +1234,7 @@ static int qm_qp_ctx_cfg(struct hisi_qp *qp, int qp_id, int pasid)
 		kfree(sqc);
 		return -ENOMEM;
 	}
+	pr_err("---> %s: dma=%pad, size=%zx\n", __FUNCTION__, sqc_dma, sizeof(struct qm_sqc));
 
 	INIT_QC_COMMON(sqc, qp->sqe_dma, pasid);
 	if (ver == QM_HW_V1) {
@@ -1259,6 +1262,7 @@ static int qm_qp_ctx_cfg(struct hisi_qp *qp, int qp_id, int pasid)
 		kfree(cqc);
 		return -ENOMEM;
 	}
+	pr_err("---> %s: cqc dma=%pad, size=%zx\n", __FUNCTION__, cqc_dma, sizeof(struct qm_cqc));
 
 	INIT_QC_COMMON(cqc, qp->cqe_dma, pasid);
 	if (ver == QM_HW_V1) {
@@ -1358,6 +1362,7 @@ static int qm_qp_has_no_task(struct hisi_qp *qp)
 		kfree(addr);
 		return -ENOMEM;
 	}
+	pr_err("---> %s: dma=%pad, size=%zx\n", __FUNCTION__, dma_addr, size);
 
 	while (i++ < 100) {
 		ret = qm_dump_sqc(qp, dma_addr);
@@ -1879,6 +1884,7 @@ static int qm_eq_ctx_cfg(struct hisi_qm *qm)
 		kfree(eqc);
 		return -ENOMEM;
 	}
+	pr_err("---> %s: dma=%pad, size=%zx\n", __FUNCTION__, eqc_dma, sizeof(struct qm_eqc));
 
 	eqc->base_l = cpu_to_le32(lower_32_bits(qm->eqe_dma));
 	eqc->base_h = cpu_to_le32(upper_32_bits(qm->eqe_dma));
@@ -1900,6 +1906,7 @@ static int qm_eq_ctx_cfg(struct hisi_qm *qm)
 		kfree(aeqc);
 		return -ENOMEM;
 	}
+	pr_err("---> %s: aeqc dma=%pad, size=%zx\n", __FUNCTION__, aeqc_dma, sizeof(struct qm_aeqc));
 
 	aeqc->base_l = cpu_to_le32(lower_32_bits(qm->aeqe_dma));
 	aeqc->base_h = cpu_to_le32(upper_32_bits(qm->aeqe_dma));
@@ -2011,6 +2018,8 @@ int hisi_qm_start(struct hisi_qm *qm)
 		qm->qdma.va = dma_alloc_coherent(dev, qm->qdma.size,
 						 &qm->qdma.dma, GFP_KERNEL);
 		dev_dbg(dev, "allocate qm dma buf(va=%pK, dma=%pad, size=%zx)\n",
+			qm->qdma.va, &qm->qdma.dma, qm->qdma.size);
+		pr_err("allocate qm dma buf(va=%pK, dma=%pad, size=%zx)\n",
 			qm->qdma.va, &qm->qdma.dma, qm->qdma.size);
 		if (!qm->qdma.va)
 			return -ENOMEM;
