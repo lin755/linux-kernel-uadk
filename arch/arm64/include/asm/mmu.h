@@ -22,6 +22,7 @@ typedef struct {
 #ifdef CONFIG_COMPAT
 	void		*sigpage;
 #endif
+	unsigned long	pinned;
 	void		*vdso;
 	unsigned long	flags;
 } mm_context_t;
