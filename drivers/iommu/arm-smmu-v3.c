@@ -1628,6 +1628,9 @@ static int arm_smmu_cmdq_batch_submit(struct arm_smmu_device *smmu,
 	return arm_smmu_cmdq_issue_cmdlist(smmu, cmds->cmds, cmds->num, true);
 }
 
+static int arm_smmu_write_ctx_desc(struct arm_smmu_domain *smmu_domain,
+				   int ssid, struct arm_smmu_ctx_desc *cd);
+
 static int arm_smmu_page_response(struct device *dev,
 				  struct iommu_fault_event *unused,
 				  struct iommu_page_response *resp)
@@ -1638,6 +1641,17 @@ static int arm_smmu_page_response(struct device *dev,
 	int sid = master->streams[0].id;
 
 	if (master->stall_enabled) {
+		/* HACK: */
+		struct iommu_domain *domain = iommu_get_domain_for_dev(dev);
+		static int test_disable = true;
+
+		if (test_disable) {
+			dev_warn(dev, "TEST: disabling CD for pasid 0x%x\n",
+				 resp->pasid);
+			arm_smmu_write_ctx_desc(to_smmu_domain(domain),
+						resp->pasid, &invalid_cd);
+			test_disable = false;
+		}
 		cmd.opcode		= CMDQ_OP_RESUME;
 		cmd.resume.sid		= sid;
 		cmd.resume.stag		= resp->grpid;
