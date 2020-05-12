@@ -1921,7 +1921,6 @@ static int arm_smmu_write_ctx_desc(struct arm_smmu_domain *smmu_domain,
 	int ret;
 
 	spin_lock(&contexts_lock);
-	printk("%s: ssid 0x%x\n", __func__, ssid);
 	ret = __arm_smmu_write_ctx_desc(smmu_domain, ssid, cd);
 	spin_unlock(&contexts_lock);
 	return ret;
@@ -2301,10 +2300,6 @@ static void arm_smmu_write_strtab_ent(struct arm_smmu_master *master, u32 sid,
 
 	ste_live = s1_live || s2_live;
 
-	if (master)
-		dev_info(master->dev, "%s sid=%d from s1_live=%d s2_live=%d \n",
-				      __func__, sid, s1_live, s2_live);
-
 	/* Nuke the existing STE_0 value, as we're going to rewrite it */
 	val = STRTAB_STE_0_V;
 
@@ -2312,10 +2307,6 @@ static void arm_smmu_write_strtab_ent(struct arm_smmu_master *master, u32 sid,
 
 	abort = (!smmu_domain && disable_bypass) || smmu_domain->abort;
 	translate = s1_cfg || s2_cfg;
-
-	if (master)
-		dev_info(master->dev, "%s sid=%d abort=%d target=%d\n",
-				      __func__, sid, abort, translate);
 
 	if (abort || !translate) {
 		if (abort)
@@ -2331,16 +2322,8 @@ static void arm_smmu_write_strtab_ent(struct arm_smmu_master *master, u32 sid,
 		 * The SMMU can perform negative caching, so we must sync
 		 * the STE regardless of whether the old value was live.
 		 */
-		if (smmu) {
+		if (smmu)
 			arm_smmu_sync_ste_for_sid(smmu, sid);
-			if (master) {
-				dev_info(master->dev, "%s sid=%d invalidate ste with abort/bypass\n", __func__, sid);
-				dev_info(master->dev, "%s sid=%d ste dst[0] 0x%llx\n", __func__, sid, dst[0]);
-				dev_info(master->dev, "%s sid=%d ste dst[1] 0x%llx\n", __func__, sid, dst[1]);
-				dev_info(master->dev, "%s sid=%d ste dst[2] 0x%llx\n", __func__, sid, dst[2]);
-				dev_info(master->dev, "%s sid=%d ste dst[3] 0x%llx\n", __func__, sid, dst[3]);
-			}
-		}
 		return;
 	}
 
@@ -2352,13 +2335,6 @@ static void arm_smmu_write_strtab_ent(struct arm_smmu_master *master, u32 sid,
 		/* First invalidate the live STE */
 		dst[0] = cpu_to_le64(STRTAB_STE_0_CFG_ABORT);
 		arm_smmu_sync_ste_for_sid(smmu, sid);
-		if (master) {
-			dev_info(master->dev, "%s sid=%d invalidate ste CFG_ABORT\n", __func__, sid);
-			dev_info(master->dev, "%s sid=%d ste dst[0] 0x%llx\n", __func__, sid, dst[0]);
-			dev_info(master->dev, "%s sid=%d ste dst[1] 0x%llx\n", __func__, sid, dst[1]);
-			dev_info(master->dev, "%s sid=%d ste dst[2] 0x%llx\n", __func__, sid, dst[2]);
-			dev_info(master->dev, "%s sid=%d ste dst[3] 0x%llx\n", __func__, sid, dst[3]);
-		}
 	}
 
 	if (s1_cfg) {
@@ -2415,28 +2391,11 @@ static void arm_smmu_write_strtab_ent(struct arm_smmu_master *master, u32 sid,
 	if (master->ats_enabled)
 		dst[1] |= cpu_to_le64(FIELD_PREP(STRTAB_STE_1_EATS,
 						 STRTAB_STE_1_EATS_TRANS));
-	 if (master) {
-		dev_info(master->dev, "%s sid=%d invalidate ste with s1=%d s2=%d\n",
-				       __func__, sid, !!s1_cfg, !!s2_cfg);
-		dev_info(master->dev, "%s sid=%d ste dst[0] 0x%llx\n", __func__, sid, dst[0]);
-		dev_info(master->dev, "%s sid=%d ste dst[1] 0x%llx\n", __func__, sid, dst[1]);
-		dev_info(master->dev, "%s sid=%d ste dst[2] 0x%llx\n", __func__, sid, dst[2]);
-		dev_info(master->dev, "%s sid=%d ste dst[3] 0x%llx\n", __func__, sid, dst[3]);
-	 }
 
 	arm_smmu_sync_ste_for_sid(smmu, sid);
 	/* See comment in arm_smmu_write_ctx_desc() */
 	WRITE_ONCE(dst[0], cpu_to_le64(val));
 	arm_smmu_sync_ste_for_sid(smmu, sid);
-
-	if (master) {
-		dev_info(master->dev, "%s sid=%d updated ste for s1=%d s2=%d\n",
-			 __func__, sid, !!s1_cfg, !!s2_cfg);
-		dev_info(master->dev, "%s sid=%d ste dst[0] 0x%llx\n", __func__, sid, dst[0]);
-		dev_info(master->dev, "%s sid=%d ste dst[1] 0x%llx\n", __func__, sid, dst[1]);
-		dev_info(master->dev, "%s sid=%d ste dst[2] 0x%llx\n", __func__, sid, dst[2]);
-		dev_info(master->dev, "%s sid=%d ste dst[3] 0x%llx\n", __func__, sid, dst[3]);
-	}
 
 	/* It's likely that we'll want to use the new STE soon */
 	if (!(smmu->options & ARM_SMMU_OPT_SKIP_PREFETCH))
