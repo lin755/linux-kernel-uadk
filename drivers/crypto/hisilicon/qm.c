@@ -2179,8 +2179,12 @@ static int qm_alloc_uacce(struct hisi_qm *qm)
 		.flags = UACCE_DEV_SVA,
 		.ops = &uacce_qm_ops,
 	};
+	int ret;
 
-	strncpy(interface.name, pdev->driver->name, sizeof(interface.name));
+	ret = strscpy(interface.name, pdev->driver->name,
+		      sizeof(interface.name));
+	if (ret < 0)
+		return -ENAMETOOLONG;
 
 	uacce = uacce_alloc(&pdev->dev, &interface);
 	if (IS_ERR(uacce))
