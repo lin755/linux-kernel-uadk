@@ -983,6 +983,41 @@ static void iort_named_component_init(struct device *dev,
 					   nc->node_flags);
 }
 
+enum {
+	STALL_DSM_FNS		=  0,
+	STALL_DSM_GET		=  1,
+};
+
+static const guid_t hisilicon_dsm_guid =
+	GUID_INIT(0x1A85AA1A, 0xE293, 0x415E,
+		  0x8E, 0x28, 0x8D, 0x69, 0x0A, 0x0F, 0x82, 0x0A);
+
+static int stall_dsm(struct device *dev, const guid_t *guid,
+		     unsigned int fn, u32 *result)
+{
+	union acpi_object *obj;
+	int err = 0;
+	size_t len;
+
+	obj = acpi_evaluate_dsm(ACPI_HANDLE(dev), guid, 0, fn, NULL);
+	if (!obj)
+		return -EOPNOTSUPP;
+
+	if (obj->type != ACPI_TYPE_BUFFER || obj->buffer.length < 1) {
+		err = -EINVAL;
+		goto out;
+	}
+
+	len = min_t(size_t, obj->buffer.length, 4);
+
+	*result = 0;
+	memcpy(result, obj->buffer.pointer, len);
+out:
+	ACPI_FREE(obj);
+
+	return err;
+}
+
 /**
  * iort_iommu_configure - Set-up IOMMU configuration for a device.
  *
@@ -997,6 +1032,7 @@ const struct iommu_ops *iort_iommu_configure(struct device *dev)
 	const struct iommu_ops *ops;
 	u32 streamid = 0;
 	int err = -ENODEV;
+	u32 val;
 
 	/*
 	 * If we already translated the fwspec there
@@ -1009,6 +1045,7 @@ const struct iommu_ops *iort_iommu_configure(struct device *dev)
 	if (dev_is_pci(dev)) {
 		struct pci_bus *bus = to_pci_dev(dev)->bus;
 		struct iort_pci_alias_info info = { .dev = dev };
+		int ret;
 
 		node = iort_scan_node(ACPI_IORT_NODE_PCI_ROOT_COMPLEX,
 				      iort_match_node_callback, &bus->dev);
@@ -1018,6 +1055,17 @@ const struct iommu_ops *iort_iommu_configure(struct device *dev)
 		info.node = node;
 		err = pci_for_each_dma_alias(to_pci_dev(dev),
 					     iort_pci_iommu_init, &info);
+		
+		dev_info(dev, "gzf %s\n", __func__);
+		ret = stall_dsm(dev, &hisilicon_dsm_guid, STALL_DSM_GET, &val);
+		if (!ret) {
+			struct iommu_fwspec *fwspec = dev_iommu_fwspec_get(dev);
+			if (fwspec)
+				fwspec->can_stall = 1;
+			dev_info(dev, "gzf %s pci_fixup_device\n", __func__);
+		} else 
+			dev_info(dev, "gzf %s pci_fixup_device ret=%d\n", __func__, ret);
+
 		pci_fixup_device(pci_fixup_final, to_pci_dev(dev));
 	} else {
 		int i = 0;
