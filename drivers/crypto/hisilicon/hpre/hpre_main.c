@@ -10,6 +10,7 @@
 #include <linux/module.h>
 #include <linux/pci.h>
 #include <linux/topology.h>
+#include <linux/uacce.h>
 #include "hpre.h"
 
 #define HPRE_VF_NUM			63
@@ -889,6 +890,12 @@ static int hpre_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (ret < 0) {
 		pci_err(pdev, "fail to register algs to crypto!\n");
 		goto err_with_qm_start;
+	}
+
+	if (qm->uacce) {
+		ret = uacce_register(qm->uacce);
+		if (ret)
+			goto err_with_crypto_register;
 	}
 
 	if (qm->fun_type == QM_HW_PF && vfs_num) {
