@@ -620,9 +620,11 @@ static void qm_cq_head_update(struct hisi_qp *qp)
 static void qm_poll_qp(struct hisi_qp *qp, struct hisi_qm *qm)
 {
 	if (qp->event_cb) {
+		/*
 		spin_lock(&qp->qp_lock);
 		qp->qp_status.updated = true;
 		spin_unlock(&qp->qp_lock);
+		*/
 		qp->event_cb(qp);
 		return;
 	}
@@ -2186,12 +2188,17 @@ static long hisi_qm_uacce_ioctl(struct uacce_queue *q, unsigned int cmd,
 static int hisi_qm_is_q_updated(struct uacce_queue *q)
 {
 	struct hisi_qp *qp = q->priv;
-	bool updated;
+	struct qm_cqe *cqe = qp->cqe + qp->qp_status.cq_head;
+	bool updated = false;
 
-	spin_lock(&qp->qp_lock);
-	updated = qp->qp_status.updated;
-	qp->qp_status.updated = false;
-	spin_unlock(&qp->qp_lock);
+	while (QM_CQE_PHASE(cqe) == qp->qp_status.cqc_phase) {
+		printk("%s updated\n", __func__);
+		dma_rmb();
+		qm_cq_head_update(qp);
+		cqe = qp->cqe + qp->qp_status.cq_head;
+		updated = true;
+	}
+	printk("%s no update\n", __func__);
 
 	return updated;
 }
